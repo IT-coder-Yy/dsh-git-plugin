@@ -48,11 +48,12 @@ dsh web --patch ./git-guide.cordis.yml
 #    或持久化：把 git-guide.cordis.yml 里的那一行并入 $DSH_HOME/cordis.patch.yml
 ```
 
-`git-guide.cordis.yml` 内容即一行组合声明：
+`git-guide.cordis.yml` 内容（注意：新增顶层插件行必须用 `insert` 列表；直接写 `- id/name` 只会按 id 修补已有行、会被告警跳过）：
 
 ```yaml
-- id: git-guide
-  name: deepseek-git-guide
+- insert:
+    - id: git-guide
+      name: deepseek-git-guide
 ```
 
 挂载后，输入框上方会出现"Git 操作建议"面板，模型工具（`git_propose` / `git_execute` / `git_repo_state`）对所有会话可用。
@@ -124,6 +125,12 @@ npm run lint      # node --check lib/*.js
 
 - 单测覆盖命令白名单、shell 特性拒绝、风险分级、预期结果推导；
 - 集成测试在临时 git 仓库中跑真实流程：add+commit 逐步执行、commit-msg 校验、部分执行（只 add 不 commit）检测、切分支校验、失败即停、提议顶替。
+
+## 🛠️ 常见问题
+
+- **`dsh plugin ... add` 报 pnpm 不存在**：`dsh plugin` 命令是转发给 pnpm 的，需要先安装 pnpm（`npm i -g pnpm` 或启用 corepack）；也可以直接把本仓库目录符号链接进 profile 的 `node_modules` 等价安装。
+- **面板没出现但工具可用**：`lib/index.js` 声明了 `inject: ['webServer']`，插件会等 webServer 服务就绪后再挂载路由（挂载时序问题，已内置处理）；非 web profile（headless/tui）本来就只有工具、没有面板。
+- **`--patch` 新增行不生效**：补丁对不存在 id 的行只告警跳过，新增行必须用 `insert` 列表（见上）。
 
 ## 📄 License
 

@@ -1,7 +1,12 @@
-# deepseek-git-guide 组合挂载行
+# deepseek-git-guide 组合挂载补丁
 #
 # 用法一（临时补丁）：dsh web --patch ./git-guide.cordis.yml
-# 用法二（持久）：把下面这一行并入 $DSH_HOME/cordis.patch.yml 或 profile 的 cordis.yml
-# 前置条件：已用 dsh plugin --profile <名字> add deepseek-git-guide 安装本包
-- id: git-guide
-  name: deepseek-git-guide
+# 用法二（持久）：把下面这份补丁并入 profile 的 cordis.patch.yml
+#                 （或 $DSH_HOME/cordis.patch.yml，对所有 profile 生效）
+# 前置条件：已用 dsh plugin --profile <名字> add deepseek-git-guide（或等价方式）安装本包
+#
+# 注意：补丁里新增顶层插件行必须用 insert 列表（无 id 的 insert 追加到顶层）；
+#       直接写 `- id: git-guide / name: ...` 只会按 id 修补已有行，会告警跳过。
+- insert:
+    - id: git-guide
+      name: deepseek-git-guide
