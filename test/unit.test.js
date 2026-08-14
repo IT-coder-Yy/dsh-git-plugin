@@ -5,7 +5,7 @@
  */
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { helpers } = require('../src/host')
+const { helpers } = require('../lib')
 
 const { splitSegments, validateCommand, classifyRisk, addPathsOf, deriveChecks } = helpers
 

@@ -10,7 +10,7 @@ const assert = require('node:assert')
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
-const { helpers } = require('../src/host')
+const { helpers } = require('../lib')
 const { makeShell, createRepo, cleanup } = require('./helpers')
 
 const { deriveChecks, runChecks, executeProposalSteps, captureFingerprint, storeProposal, findProposal, proposalView, latestPending } = helpers

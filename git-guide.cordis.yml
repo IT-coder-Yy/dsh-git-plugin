@@ -1,0 +1,7 @@
+# deepseek-git-guide 组合挂载行
+#
+# 用法一（临时补丁）：dsh web --patch ./git-guide.cordis.yml
+# 用法二（持久）：把下面这一行并入 $DSH_HOME/cordis.patch.yml 或 profile 的 cordis.yml
+# 前置条件：已用 dsh plugin --profile <名字> add deepseek-git-guide 安装本包
+- id: git-guide
+  name: deepseek-git-guide
