@@ -5,8 +5,10 @@
 #                 （或 $DSH_HOME/cordis.patch.yml，对所有 profile 生效）
 # 前置条件：已用 dsh plugin --profile <名字> add deepseek-git-guide（或等价方式）安装本包
 #
-# 注意：补丁里新增顶层插件行必须用 insert 列表（无 id 的 insert 追加到顶层）；
-#       直接写 `- id: git-guide / name: ...` 只会按 id 修补已有行，会告警跳过。
+# 注意：package.json 的 dsh.bundle.patch 仅对 dsh.profile.bundles 里列出的包生效，
+#       本包按组合行安装时该字段会被忽略 —— 必须通过 --patch 或 cordis.patch.yml 挂载。
+# 补丁里新增顶层插件行必须用 insert 列表（无 id 的 insert 追加到顶层）；
+# 直接写 `- id: git-guide / name: ...` 只会按 id 修补已有行，会告警跳过。
 - insert:
     - id: git-guide
       name: deepseek-git-guide

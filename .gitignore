@@ -3,6 +3,13 @@ node_modules/
 dist/
 build/
 *.log
+*.tgz
+coverage/
+
+# 本地环境变量（示例文件可显式保留）
+.env
+.env.*
+!.env.example
 
 # 编辑器 / 系统
 .DS_Store

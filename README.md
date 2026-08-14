@@ -1,141 +1,140 @@
-# deepseek-git-guide 🧭
+# deepseek-git-guide
 
-**DeepSeek Harness Cordis 插件（静态 npm 包形态）**：当你想对代码做 git 操作、却不知道具体命令时，用自然语言描述意图，插件会给出**最简洁、最安全**的命令建议与中文解释，最后由你决定**直接执行**还是**复制命令手动执行**。
+面向 DeepSeek Harness 的 Git 操作引导插件：把自然语言意图转换为经过校验的 Git 命令提议，并让用户在「直接执行」与「手动执行」之间选择。
 
-> 发布到 npm 后，任何 DeepSeek Harness profile 都可以通过
-> `dsh plugin --profile <名字> add deepseek-git-guide` 安装，并在组合里挂载一行即可使用。
+> [!IMPORTANT]
+> 本项目是社区项目，并非 DeepSeek 官方产品。DeepSeek Harness 当前仍处于开发者预览阶段，插件接口可能变化；发布版本会在下方记录兼容性基线。
 
----
+## 目录
 
-## ✨ 功能特性
+- [功能特性](#功能特性)
+- [工作原理](#工作原理)
+- [环境要求](#环境要求)
+- [安装](#安装)
+- [使用示例](#使用示例)
+- [安全模型](#安全模型)
+- [开发与测试](#开发与测试)
+- [许可证](#许可证)
 
-| 能力 | 说明 |
-| --- | --- |
-| 🗣️ 意图 → 命令 | 用户自然语言描述操作（如"撤销最近一次提交但保留改动"），模型选择最简最安全的纯 git 命令并给出中文解释 |
-| 📋 多步骤提议 | 多条命令用 `steps` 数组分开传入，**逐步校验、逐步执行、失败即停**，每步单独显示 ✓/✗，不依赖 `&&` 黑盒拼接 |
-| 🖱️ 双执行路径 | 面板 [直接执行] 由插件运行；[复制命令] 手动在终端执行 |
-| ✅ 手动执行校验 | 复制后进入"待执行"，按命令类型校验**预期结果**（提交信息 / 当前分支 / 暂存文件 / 分支删除 / stash / 推送状态），区分 **已验证 / 部分执行 / 未执行** |
-| 🔧 失败自动恢复 | 执行失败自动附带仓库诊断信息，并要求模型分析原因后提出**修正命令**（如加 `-f`、`git -c` 覆盖 ssh 参数、补步骤、先解冲突），新提议自动顶替旧提议 |
-| 🛡️ 安全分级 | 只接受纯 git 命令（拒绝管道、重定向、`$(...)`、反引号等 shell 特性）；自动分级 **安全 / 常规 / 高风险**（`reset --hard`、force push、`rebase`、`clean -fd`、`branch -D` 等），高风险必须用户勾选确认才放行 |
+## 功能特性
 
-## 🏗️ 工作原理
+- **步骤化执行**：多步操作登记为独立步骤，逐步校验、逐步执行，任一步失败立即停止。
+- **命令白名单**：固定 Git 子命令白名单，拒绝全局选项、外部子命令、shell 控制符、命令替换和可执行脚本入口。
+- **风险分级**：操作分为只读、常规和高风险三级；高风险操作无论直接执行还是复制，都必须再次确认。
+- **会话隔离**：提议按 Harness 会话隔离，使用随机 ID，成功或失败后均不可重放。
+- **迁移校验**：手动执行采用「复制前基线 → 执行后目标状态」的校验；无法可靠归因时不会误报成功。
+- **安全输出**：执行失败返回仓库诊断，输出中的 URL 凭据和常见令牌会被脱敏。
 
+## 工作原理
+
+```text
+自然语言描述
+    │
+    ▼
+git_propose ── 解析并校验每个步骤 → 登记为提议（随机 proposalId，绑定当前会话）
+    │
+    ▼
+用户选择
+    ├─ 直接执行 ── git_execute 按步骤运行，失败即停
+    └─ 手动执行 ── 复制命令到终端，面板按「基线 → 目标状态」迁移校验
 ```
-浏览器（Client · lib/client.js）                 Host 进程（lib/index.js）
-┌──────────────────────────────┐   POST /git-guide  ┌──────────────────────────────┐
-│ conversation.input.dock 面板   │ ←─ state/verify ───→│ ctx.webServer 路由            │
-│ · 步骤列表 + 风险徽标           │ ←─ execute ────────→│ · 提议存储（按会话，内存）       │
-│ · [直接执行] [复制命令]         │ ←─ dismiss/mark-   →│ · ctx.tools.register 三个工具  │
-│ · 已验证/部分执行/诊断展示        │    copied          │ · 预期结果校验（deriveChecks）  │
-└──────────────────────────────┘                     └──────────────────────────────┘
-                                   模型工具：git_propose / git_execute / git_repo_state
-```
 
-- **Host**（`lib/index.js`）：`ctx.tools.register` 注册 3 个模型工具；`ctx.webServer` 注册 `POST /git-guide` 路由（`body.action` 分发）作为 Client→Host 通信；通过 `shell` 服务执行 git 命令。
-- **Client**（`lib/client.js`）：产物为 web shell 模块加载器格式（`window.__ModuleLoader__.load({ id, factory })`，factory 内 `require("react")`）；`package.json` 的 `dsh.client` 声明使其进入 web bundle；面板注册在 `conversation.input.dock`；同源 `fetch('/git-guide')` 与 Host 通信。
-- 依赖：Host 的 `shell` / `tools` / `webServer` 服务；Client 的 `slots` / `timer`（由 `@deepseek-ai/dsh-client-runtime` 提供）。
-- 说明：headless / tui 等非 web profile 只获得三个模型工具（无交互面板），核心"意图 → 命令 → 执行"流程依然可用。
+## 环境要求
 
-## 🚀 安装（供其他用户 / 其他 profile）
+- Node.js `^22.19.0 || >=24.0.0`
+- 支持静态 Cordis 插件的 DeepSeek Harness 开发者预览版本
+- Git
+
+当前兼容性冒烟基线为 `@deepseek-ai/dsh@0.1.0-rc.6`（包括同版本的 Shell、Tools、WebServer 和 Client Runtime）。本项目不直接安装这些运行时服务，它们由 Harness profile 提供。
+
+## 安装
+
+发布到 npm 后，将插件安装到目标 profile：
 
 ```bash
-# 1. 把插件装进某个 profile（转发给 pnpm 安装）
-dsh plugin --profile <名字> add deepseek-git-guide
+dsh plugin --profile <profile-name> add deepseek-git-guide
+```
 
-# 2. 在组合里挂载它（临时补丁方式）
+仅从 GitHub 安装当前源码版本：
+
+```bash
+dsh plugin --profile <profile-name> add github:IT-coder-Yy/deepseek-git-guide
+```
+
+`package.json` 中的 `dsh.bundle.patch` 会自动合并 [git-guide.cordis.yml](git-guide.cordis.yml)，无需再手工复制挂载配置。安装后按你的正常方式重新启动该 profile。
+
+本地开发可直接安装仓库路径；需要单独调试补丁时也可以：
+
+```bash
 dsh web --patch ./git-guide.cordis.yml
-
-#    或持久化：把 git-guide.cordis.yml 里的那一行并入 $DSH_HOME/cordis.patch.yml
 ```
 
-`git-guide.cordis.yml` 内容（注意：新增顶层插件行必须用 `insert` 列表；直接写 `- id/name` 只会按 id 修补已有行、会被告警跳过）：
+插件注册三个模型工具：
 
-```yaml
-- insert:
-    - id: git-guide
-      name: deepseek-git-guide
+| 工具 | 说明 |
+| --- | --- |
+| `git_repo_state` | 只读获取仓库状态。 |
+| `git_propose` | 校验并登记一个或多个 Git 步骤。 |
+| `git_execute` | 仅按同会话中的 `proposalId` 执行已登记提议。 |
+
+Web profile 还会在 `conversation.input.dock` 显示交互面板；headless/TUI profile 只使用模型工具。
+
+## 使用示例
+
+```text
+你：把文档更新提交到当前分支，提交信息为 docs: update guide
+
+提议：
+1. git add docs/guide.md
+2. git commit -m "docs: update guide"
 ```
 
-挂载后，输入框上方会出现"Git 操作建议"面板，模型工具（`git_propose` / `git_execute` / `git_repo_state`）对所有会话可用。
+直接执行时，Host 按步骤运行并展示每步结果。选择手动执行时，多步命令会以 `&&` 连接，确保失败即停；面板只会在目标状态相对于复制时基线发生预期迁移后标记为已验证。
 
-## 📦 发布
+## 安全模型
+
+插件把模型输出视为不可信输入，并在登记和执行两个阶段重复校验：
+
+1. 每个步骤只能是一条 `git <子命令> ...` 命令，且子命令必须位于固定白名单中。
+2. 参数会被解析后重新进行 shell 安全引用；禁止 `;`、`&`、管道、重定向、`$()`、反引号和换行。
+3. 禁止 `git -c` 等全局选项、未知 `git-*` 外部程序、`rebase --exec`、`ext::` transport，以及可能启动外部程序的选项。
+4. 高风险操作需要显式确认；`proposalId` 严格绑定会话且只能执行一次。
+5. RPC 只接受 JSON POST，拒绝明显的跨站请求，并限制请求体和身份字段大小。
+6. 远程 URL 和诊断输出中的常见凭据格式会被脱敏。请始终使用 Git 凭据管理器，不要把令牌写进命令或 remote URL。
+
+安全边界与已知限制：
+
+- 命令在 Harness 提供的 Shell 与沙箱策略内执行；插件不会扩大该策略，但也不能替代主机级权限隔离。
+- Git 本身可能读取仓库或用户配置并触发 hook、credential helper、pager、transport helper 等外部程序。只应在可信仓库和可信 Git 配置中使用本插件。
+- 提议保存在 Host 内存中，进程重启后会丢失；这不是持久任务队列。
+- 手动执行验证不是终端审计。对于缺少可靠目标状态的命令，插件只报告检测到变化，不会宣称命令已经执行。
+- 子命令白名单有意保持保守；`config`、`submodule` 等具有额外执行面的命令不会被接受。
+
+发现安全问题时请按 [SECURITY.md](SECURITY.md) 私下报告，不要在公开 Issue 中披露利用细节。
+
+## 开发与测试
 
 ```bash
-npm login                 # 你的 npm 账号
-npm version patch         # 或 minor / major
-npm publish               # 发布到 npm registry
+npm run lint                              # 语法检查
+npm test                                  # 单元 + 集成测试
+npm run check                             # lint + test
+npm pack --dry-run --ignore-scripts       # 检查发布内容
 ```
 
-未发布前也可以本地联调：把 `package.json` 里的 `repository.url` 换成你的地址后，
-用 `dsh plugin --profile <名字> add <本地路径或 git 地址>` 安装。
+测试包含纯逻辑单元测试和真实临时 Git 仓库集成测试，覆盖命令边界、风险分级、会话隔离、防重放、分步失败、敏感信息脱敏及手动执行状态迁移。测试不会访问网络。
 
-## 💬 使用示例
+目录结构：
 
-```
-你：撤销最近一次提交但保留改动
-插件：git reset --soft HEAD~1   ← 面板出现命令 + 解释 + [直接执行] [复制命令]
-你：直接执行 → 插件运行并展示结果，成功后面板自动关闭
-```
+| 路径 | 说明 |
+| --- | --- |
+| `lib/index.js` | Host 插件、工具、RPC、安全校验与执行 |
+| `lib/client.js` | Web Client 面板 |
+| `test/unit.test.js` | 命令、风险、会话和 RPC 单元测试 |
+| `test/integration.test.js` | 真实临时 Git 仓库集成测试 |
+| `git-guide.cordis.yml` | 自动合并的 Cordis 补丁 |
 
-```
-你：把这几个文件提交到当前分支，提交信息 fix: update docs
-插件：1. git add docs/api.md frontend/next.config.ts
-      2. git commit -m "fix: update docs"
-      ← 分步展示，逐步执行，失败即停
-```
+贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。发布前运行 `npm run check`；`prepublishOnly` 也会执行同一检查。
 
-```
-你（复制命令后在终端手动执行，只跑了第一步）：
-插件：⚠ 检测到仓库状态变化，但预期结果未达成：最近提交信息应为「fix: update docs」
-      ← 保留卡片，提示差距，可重新检测或放弃
-```
-
-## 🛡️ 安全模型
-
-- **命令白名单**：每个步骤必须是 `git` 开头的命令；拒绝 shell 管道 `|`、重定向 `< >`、`$(...)`、反引号、命令替换；
-- **结构校验**：目标目录必须是 git 仓库，命令长度受限；
-- **风险分级**：只读命令（status/log/diff…）为安全；常规操作（add/commit/push…）为常规；破坏性 / 改写历史 / 强制推送 / 清空类命令为高风险；
-- **双重确认**：高风险命令在 `git_propose` 与 `git_execute` 两处都要求 `confirm: true`（对应面板的"我已了解风险"勾选）；
-- **执行门禁**：`git_execute` 只接受 `git_propose` 返回的 `proposalId`，不接受任意命令字符串；
-- **RPC 边界**：`/git-guide` 路由与页面同源，仅本机可用（本地个人工具语义）。
-
-## 📁 目录结构
-
-```
-deepseek-git-guide/
-├── lib/
-│   ├── index.js        # Host 插件：ctx.tools.register + /git-guide 路由 + 校验/执行/验证逻辑
-│   └── client.js       # Client 插件：输入框上方交互面板（fetch RPC）
-├── test/
-│   ├── helpers.js              # 测试辅助：shell 适配器 + 临时 git 仓库
-│   ├── unit.test.js            # 单测：命令校验 / 风险分级 / 预期结果推导
-│   └── integration.test.js     # 集成测试：真实 git 仓库里的执行/校验/部分执行检测
-├── git-guide.cordis.yml # 组合挂载示例（--patch 或并入 cordis.patch.yml）
-├── package.json         # main/exports + dsh.client 声明（test/lint 脚本）
-├── LICENSE              # MIT
-└── README.md
-```
-
-## 🧪 测试
-
-```bash
-npm test          # node --test test/
-npm run lint      # node --check lib/*.js
-```
-
-- 单测覆盖命令白名单、shell 特性拒绝、风险分级、预期结果推导；
-- 集成测试在临时 git 仓库中跑真实流程：add+commit 逐步执行、commit-msg 校验、部分执行（只 add 不 commit）检测、切分支校验、失败即停、提议顶替。
-
-## 🛠️ 常见问题
-
-- **`dsh plugin ... add` 报 pnpm 不存在**：`dsh plugin` 命令是转发给 pnpm 的，需要先安装 pnpm（`npm i -g pnpm` 或启用 corepack）；也可以直接把本仓库目录符号链接进 profile 的 `node_modules` 等价安装。
-- **面板没出现但工具可用**：`lib/index.js` 声明了 `inject: ['webServer']`，插件会等 webServer 服务就绪后再挂载路由（挂载时序问题，已内置处理）；非 web profile（headless/tui）本来就只有工具、没有面板。
-- **`--patch` 新增行不生效**：补丁对不存在 id 的行只告警跳过，新增行必须用 `insert` 列表（见上）。
-
-## 📄 License
+## 许可证
 
 [MIT](LICENSE)
-
----
-
-*由 DeepSeek Harness 动态 Cordis 插件开发流程产出，随后移植为静态 npm 包形态。欢迎提 Issue / PR。*

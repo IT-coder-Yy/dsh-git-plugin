@@ -13,7 +13,7 @@ const path = require('node:path')
 const { helpers } = require('../lib')
 const { makeShell, createRepo, cleanup } = require('./helpers')
 
-const { deriveChecks, runChecks, executeProposalSteps, captureFingerprint, storeProposal, findProposal, proposalView, latestPending } = helpers
+const { deriveChecks, runChecks, verifyProposal, executeProposalSteps, executeRegisteredProposal, captureFingerprint, storeProposal, findProposal, proposalView, latestPending } = helpers
 
 test('提交流程：add+commit 两步执行 → 逐步成功 → 预期校验全部通过', async () => {
   const dir = createRepo()
@@ -96,10 +96,12 @@ test('执行失败即停：第一步成功、第二步失败 → ok=false 且第
 })
 
 test('提议存储：登记 / 查找 / 新提议顶替旧提议', () => {
-  const mk = (id, seq) => ({ proposalId: id, sessionId: 's1', closed: false, createdAt: seq, steps: [{ command: 'git status', result: null }] })
+  const now = Date.now()
+  const mk = (id, seq) => ({ proposalId: id, sessionId: 's1', closed: false, createdAt: now + seq, steps: [{ command: 'git status', result: null }] })
   storeProposal('s1', mk('p1', 1))
   storeProposal('s1', mk('p2', 2))
   assert.strictEqual(findProposal('s1', 'p1').proposalId, 'p1')
+  assert.strictEqual(findProposal('s2', 'p1'), undefined, '其他会话不得读取本会话提议')
   const p2 = findProposal('s1', 'p2')
   const view = proposalView(p2)
   assert.strictEqual(view.proposalId, 'p2')
@@ -111,4 +113,96 @@ test('提议存储：登记 / 查找 / 新提议顶替旧提议', () => {
   for (const pp of prev) pp.closed = true
   storeProposal('s1', mk('p3', 3))
   assert.strictEqual(latestPending('s1').proposalId, 'p3')
+})
+
+test('提议执行防重放：成功后同一 proposalId 不能再次执行', async () => {
+  const dir = createRepo()
+  try {
+    const base = makeShell(dir)
+    let userCommandRuns = 0
+    const shell = {
+      resolve: base.resolve,
+      run: async (spec) => {
+        if (spec.command === "'git' 'status'") userCommandRuns++
+        return base.run(spec)
+      },
+    }
+    const proposal = {
+      proposalId: 'replay-test',
+      workdir: dir,
+      command: 'git status',
+      steps: [{ command: 'git status', result: null }],
+      status: 'pending',
+      closed: false,
+    }
+    const first = await executeRegisteredProposal(shell, proposal)
+    const second = await executeRegisteredProposal(shell, proposal)
+    assert.strictEqual(first.ok, true)
+    assert.strictEqual(second.ok, false)
+    assert.match(second.error, /不能重复执行/)
+    assert.strictEqual(userCommandRuns, 1)
+  } finally { cleanup(dir) }
+})
+
+test('手动验证：只有目标状态从不满足迁移为满足才确认成功', async () => {
+  const dir = createRepo()
+  try {
+    const shell = makeShell(dir)
+    const proposal = {
+      workdir: dir,
+      steps: [{ command: 'git switch -c feat/manual', result: null }],
+      fingerprint: await captureFingerprint(shell, dir),
+    }
+    proposal.baselineFailed = await runChecks(shell, dir, deriveChecks(proposal.steps.map((step) => step.command)))
+    assert.strictEqual(proposal.baselineFailed.length, 1)
+
+    execFileSync('git', ['switch', '-q', '-c', 'feat/manual'], { cwd: dir })
+    const verified = await verifyProposal(shell, proposal)
+    assert.strictEqual(verified.verified, true)
+    assert.strictEqual(verified.partial, false)
+  } finally { cleanup(dir) }
+})
+
+test('手动验证：复制前已满足的状态不得误报为本次执行成功', async () => {
+  const dir = createRepo()
+  try {
+    const shell = makeShell(dir)
+    const proposal = {
+      workdir: dir,
+      steps: [{ command: 'git commit -m init', result: null }],
+      fingerprint: await captureFingerprint(shell, dir),
+    }
+    proposal.baselineFailed = await runChecks(shell, dir, deriveChecks(proposal.steps.map((step) => step.command)))
+    assert.deepStrictEqual(proposal.baselineFailed, [])
+
+    const result = await verifyProposal(shell, proposal)
+    assert.strictEqual(result.verified, false)
+    assert.match(result.message, /已经满足/)
+  } finally { cleanup(dir) }
+})
+
+test('执行失败自动生成并登记修正提议（.gitignore 忽略 → add -f）', async () => {
+  const dir = createRepo()
+  try {
+    const shell = makeShell(dir)
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'b.txt\n')
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'x\n')
+    const proposal = {
+      proposalId: 'p-rec', sessionId: 'rec-sess', workdir: dir,
+      command: 'git add b.txt',
+      steps: [{ command: 'git add b.txt', result: null }],
+      risk: 'normal', reasons: [], confirmed: false,
+      status: 'pending', closed: false,
+    }
+    const result = await executeRegisteredProposal(shell, proposal)
+    assert.strictEqual(result.ok, false)
+    assert.ok(result.recovery, '失败响应应携带 recovery')
+    assert.strictEqual(result.recovery.command, 'git add -f b.txt')
+    assert.ok(result.recovery.proposalId, '应自动登记修正提议')
+    const next = latestPending('rec-sess')
+    assert.ok(next, '修正提议应为最新的 pending 提议')
+    assert.strictEqual(next.recovery, true)
+    assert.strictEqual(next.command, 'git add -f b.txt')
+    assert.strictEqual(next.status, 'pending')
+  } finally { cleanup(dir) }
 })
