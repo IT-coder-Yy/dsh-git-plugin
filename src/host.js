@@ -611,3 +611,21 @@ module.exports = {
     })
   },
 }
+
+// 供测试 / 二次开发复用的纯逻辑（动态 Cordis 运行时不会用到这些附加属性）
+module.exports.helpers = {
+  splitSegments,
+  validateCommand,
+  classifyRisk,
+  addPathsOf,
+  deriveChecks,
+  runChecks,
+  captureFingerprint,
+  captureDiagnostics,
+  executeProposalSteps,
+  storeProposal,
+  findProposal,
+  proposalView,
+  latestPending,
+  latestPendingAnywhere,
+}

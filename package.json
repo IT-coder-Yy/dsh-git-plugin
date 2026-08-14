@@ -25,6 +25,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "lint": "node --check src/host.js && node --check src/client.js"
+    "lint": "node --check src/host.js && node --check src/client.js",
+    "test": "node --test \"test/*.test.js\""
   }
 }

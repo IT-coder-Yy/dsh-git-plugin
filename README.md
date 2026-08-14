@@ -40,7 +40,7 @@
 这是一个**动态 Cordis 插件**：不需要安装 npm 包，在 DeepSeek Harness 的会话里用 `cordis_define` 工具加载即可。
 
 1. 打开一个使用 `cordis` agent preset 的会话；
-2. 让模型执行 `cordis_define`，分别粘贴 `src/host.js` 与 `src/client.js` 的内容作为 `code.host` / `code.client`（文件头部的注释块可省略）；
+2. 让模型执行 `cordis_define`，把 `src/host.js` / `src/client.js` 的内容作为 `code.host` / `code.client`。注意：两个文件是**模块化源码**（末尾是 `module.exports =`），粘贴时把 `module.exports =` 改成 `return` 即为 `cordis_define` 需要的函数体（文件头部注释块可省略）；
 3. `cordis_run` 激活，首次需在界面批准；
 4. 激活后，输入框上方会出现"Git 操作建议"面板，三个工具（`git_propose` / `git_execute` / `git_repo_state`）自动可用。
 
@@ -78,19 +78,27 @@
 ```
 deepseek-git-guide/
 ├── src/
-│   ├── host.js        # Host 半区：工具 + RPC + 校验/执行/验证逻辑
+│   ├── host.js        # Host 半区：工具 + RPC + 校验/执行/验证逻辑（module.exports.helpers 供测试复用）
 │   └── client.js      # Client 半区：输入框上方交互面板
-├── package.json       # 元数据（lint: node --check）
+├── test/
+│   ├── helpers.js             # 测试辅助：shell 适配器 + 临时 git 仓库
+│   ├── unit.test.js           # 单测：命令校验 / 风险分级 / 预期结果推导
+│   └── integration.test.js    # 集成测试：真实 git 仓库里的执行/校验/部分执行检测
+├── package.json       # 元数据（test: node --test test/）
 ├── LICENSE            # MIT
 ├── README.md
 └── .gitignore
 ```
 
-## 🧪 开发
+## 🧪 测试
 
 ```bash
-node --check src/host.js && node --check src/client.js   # 语法检查
+npm test          # node --test test/
+npm run lint      # node --check src/*.js
 ```
+
+- 单测覆盖命令白名单、shell 特性拒绝、风险分级、预期结果推导；
+- 集成测试在临时 git 仓库中跑真实流程：add+commit 逐步执行、commit-msg 校验、部分执行（只 add 不 commit）检测、切分支校验、失败即停、提议顶替。
 
 ## 📄 License
 
