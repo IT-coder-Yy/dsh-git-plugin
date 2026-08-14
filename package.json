@@ -1,0 +1,30 @@
+{
+  "name": "deepseek-git-guide",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness 动态 Cordis 插件：把用户对 git 操作的自然语言描述，转成最简洁安全的命令建议与解释，并让用户在「直接执行 / 手动执行」之间选择。",
+  "license": "MIT",
+  "keywords": [
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "dynamic-plugin",
+    "git",
+    "git-assistant",
+    "ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<your-github-name>/deepseek-git-guide.git"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "lint": "node --check src/host.js && node --check src/client.js"
+  }
+}

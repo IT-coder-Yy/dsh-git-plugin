@@ -1,0 +1,16 @@
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+*.log
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Python / 其他语言缓存（示例，按需调整）
+__pycache__/
+*.py[cod]
+.pytest_cache/
