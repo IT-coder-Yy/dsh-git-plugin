@@ -116,6 +116,10 @@ The Web profile adds a Git action beside the composer and opens the workbench in
 
 Please report vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
+## Compatibility
+
+Last verified on **2026-08-16** with DeepSeek Harness `0.1.0-rc.6` and dsh-easygit-plugin `0.2.1`. Verification covered the full project check (59 tests), reproducible build artifacts, DSH Web startup, and a successful response from the plugin's `/easygit` host route.
+
 ## Development
 
 Requires Node.js `^22.19.0 || >=24.0.0`, Git, and a DeepSeek Harness developer preview release that supports static Cordis plugins.

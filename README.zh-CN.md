@@ -116,6 +116,10 @@ Web profile 会在输入框旁添加 Git 操作入口，并在原生详情区域
 
 如需报告安全漏洞，请按照 [SECURITY.md](SECURITY.md) 中的方式私下联系。
 
+## 兼容性
+
+最后于 **2026-08-16** 使用 DeepSeek Harness `0.1.0-rc.6` 和 dsh-easygit-plugin `0.2.1` 完成验证。验证范围包括完整项目检查（59 项测试）、构建产物可重复性、DSH Web 启动，以及插件 `/easygit` Host 路由成功响应。
+
 ## 开发
 
 需要 Node.js `^22.19.0 || >=24.0.0`、Git，以及支持静态 Cordis 插件的 DeepSeek Harness 开发者预览版本。
