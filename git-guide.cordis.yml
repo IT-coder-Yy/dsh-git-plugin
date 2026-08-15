@@ -1,14 +1,14 @@
-# deepseek-git-guide 组合挂载补丁
+# dsh-easygit-plugin composition mount patch
 #
-# 用法一（临时补丁）：dsh web --patch ./git-guide.cordis.yml
-# 用法二（持久）：把下面这份补丁并入 profile 的 cordis.patch.yml
-#                 （或 $DSH_HOME/cordis.patch.yml，对所有 profile 生效）
-# 前置条件：已用 dsh plugin --profile <名字> add deepseek-git-guide（或等价方式）安装本包
+# Temporary use: dsh web --patch ./git-guide.cordis.yml
+# Persistent use: merge this patch into the profile's cordis.patch.yml, or into
+# $DSH_HOME/cordis.patch.yml for all profiles. Install this package first with
+# dsh plugin --profile <name> add dsh-easygit-plugin (or an equivalent command).
 #
-# 注意：package.json 的 dsh.bundle.patch 仅对 dsh.profile.bundles 里列出的包生效，
-#       本包按组合行安装时该字段会被忽略 —— 必须通过 --patch 或 cordis.patch.yml 挂载。
-# 补丁里新增顶层插件行必须用 insert 列表（无 id 的 insert 追加到顶层）；
-# 直接写 `- id: git-guide / name: ...` 只会按 id 修补已有行，会告警跳过。
+# package.json's dsh.bundle.patch only applies to packages listed in
+# dsh.profile.bundles. A composition-row installation must use --patch or
+# cordis.patch.yml. New top-level plugin rows must use insert; a direct
+# `- id: git-guide / name: ...` entry only patches an existing id and is skipped.
 - insert:
     - id: git-guide
-      name: deepseek-git-guide
+      name: dsh-easygit-plugin

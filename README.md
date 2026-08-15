@@ -1,141 +1,130 @@
-# deepseek-git-guide
+<div align="center">
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+# DSH Git Plugin
 
-A Git workflow guidance plugin for DeepSeek Harness. It turns natural-language intent into validated Git command proposals and lets users choose between direct execution and manual execution.
+**A visual Git workbench for inspecting repositories, running common actions, and safely executing AI-generated Git workflows in DeepSeek Harness Web.**
 
-> [!IMPORTANT]
-> This is a community project and is not an official DeepSeek product. DeepSeek Harness is currently in developer preview, and its plugin APIs may change. The compatibility baseline for each release is documented below.
+![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-Developer%20Preview-4f46e5)
+![Web profile](https://img.shields.io/badge/profile-Web-0ea5e9)
+[![npm version](https://img.shields.io/npm/v/dsh-easygit-plugin.svg)](https://www.npmjs.com/package/dsh-easygit-plugin)
+[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-181717?logo=github)](https://github.com/IT-coder-Yy/dsh-git-plugin)
+[![MIT License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-## Table of contents
+English · [简体中文](README.zh-CN.md)
 
-- [Features](#features)
-- [How it works](#how-it-works)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Usage example](#usage-example)
-- [Security model](#security-model)
-- [Development and testing](#development-and-testing)
-- [License](#license)
+</div>
+
+## How to use
+
+<p align="center">
+  <strong>👀 Inspect Git state &nbsp;→&nbsp; 🖱️ Run a quick action or ask the Agent &nbsp;→&nbsp; ✅ Review &nbsp;→&nbsp; 🚀 Execute</strong>
+</p>
+
+## Preview
+
+![DSH Git Plugin visual workbench](./assets/preview.png)
 
 ## Features
 
-- **Step-by-step execution**: Multi-step operations are registered as independent steps, validated and executed one at a time, and stopped immediately if any step fails.
-- **Command allowlist**: A fixed allowlist of Git subcommands rejects global options, external subcommands, shell control operators, command substitution, and executable script entry points.
-- **Risk classification**: Operations are classified as read-only, routine, or high-risk. High-risk operations always require an additional confirmation before either direct execution or copying.
-- **Session isolation**: Proposals are isolated by Harness session, use random IDs, and cannot be replayed after either success or failure.
-- **Transition validation**: Manual execution is checked against a “baseline at copy time → expected target state” transition. The plugin does not report success when the result cannot be reliably attributed to the proposed command.
-- **Safe output**: Execution failures include repository diagnostics, with URL credentials and common token formats redacted.
+1. **Visual repository state**: See the current branch, staged and unstaged files, and each file's formatted review view or raw diff.
+2. **Commit history and details**: Browse the current branch as a commit graph, then click a commit to inspect its message, author, timestamps, parents, changed files, statistics, and full diff.
+3. **One-click Git actions**: Stage or unstage one file or all files, create commits, and create, search, switch, or safely delete local branches directly from the workbench.
+4. **References at a glance**: Inspect local branches, remote branches, and tags without leaving DeepSeek Harness Web.
+5. **Natural-language workflows**: Turn a request into a clear, step-by-step Git command proposal, then execute it directly or copy it for manual execution.
+6. **Safety by default**: Validate commands against a conservative allowlist, require confirmation for high-risk operations, prevent proposal replay, and redact common credentials from diagnostics.
+
+## Quick start
+
+### 0. Allow immediate installation of the new package
+
+Newer versions of `pnpm` may delay recently published packages. To install the latest release immediately, add `dsh-easygit-plugin` to `~/.dsh/profiles/web/pnpm-workspace.yaml`:
+
+```yaml
+minimumReleaseAgeExclude:
+  - dsh-easygit-plugin
+```
+
+### 1. Install the plugin
+
+```sh
+dsh plugin --profile web add dsh-easygit-plugin
+```
+
+### 2. Start DSH Web
+
+```sh
+dsh web
+```
+
+### 3. Open the Git workbench
+
+Use the Git button beside the composer to inspect changes, review commit history, stage files, commit changes, or manage branches with a click.
+
+For a more involved workflow, ask the Agent for a Git operation. For example:
+
+```text
+Commit the documentation update to the current branch with the message "docs: update guide"
+```
+
+Review the generated steps in the Git workbench, then choose direct execution or manual execution.
+
+## Install from source
+
+```sh
+git clone https://github.com/IT-coder-Yy/dsh-git-plugin.git
+cd dsh-git-plugin
+npm install
+npm run build
+dsh plugin --profile web add ${PWD}
+```
+
+## Install from GitHub repository
+
+```sh
+dsh plugin --profile web add github:IT-coder-Yy/dsh-git-plugin
+```
+
+## Update the plugin
+
+```sh
+dsh plugin --profile web update dsh-easygit-plugin
+```
+
+## Uninstall the plugin
+
+```sh
+dsh plugin --profile web remove dsh-easygit-plugin
+```
 
 ## How it works
 
-```text
-Natural-language request
-    │
-    ▼
-git_propose ── Parse and validate each step → Register a proposal (random proposalId, bound to the current session)
-    │
-    ▼
-User chooses
-    ├─ Execute directly ── git_execute runs each step and stops on the first failure
-    └─ Execute manually ── Copy commands to the terminal; the panel validates the baseline → target-state transition
-```
-
-## Requirements
-
-- Node.js `^22.19.0 || >=24.0.0`
-- A DeepSeek Harness developer preview release that supports static Cordis plugins
-- Git
-
-The current smoke-tested compatibility baseline is `@deepseek-ai/dsh@0.1.0-rc.6`, including the matching Shell, Tools, WebServer, and Client Runtime packages. This project does not install those runtime services directly; they are provided by the Harness profile.
-
-## Installation
-
-After the package is published to npm, install it into the target profile:
-
-```bash
-dsh plugin --profile <profile-name> add deepseek-git-guide
-```
-
-To install the current source version directly from GitHub:
-
-```bash
-dsh plugin --profile <profile-name> add github:IT-coder-Yy/deepseek-git-guide
-```
-
-The `dsh.bundle.patch` field in `package.json` automatically merges [git-guide.cordis.yml](git-guide.cordis.yml), so no manual mount configuration is required. Restart the profile using your usual workflow after installation.
-
-For local development, you can install the repository path directly. To debug the patch independently, run:
-
-```bash
-dsh web --patch ./git-guide.cordis.yml
-```
-
-The plugin registers three model tools:
+The plugin registers two model tools:
 
 | Tool | Description |
 | --- | --- |
-| `git_repo_state` | Reads the repository state without modifying it. |
+| `git_repo_state` | Reads the current repository state without modifying it. |
 | `git_propose` | Validates and registers one or more Git steps. |
-| `git_execute` | Executes a registered proposal only when given a `proposalId` from the same session. |
 
-The Web profile also displays an interactive panel in `conversation.input.dock`. Headless and TUI profiles use only the model tools.
+The Web profile adds a Git action beside the composer and opens the workbench in the native details area. Its tabs provide visual access to working-tree changes and diffs, branches and references, commit history and details, stashes, and Agent-generated proposals. Commands are validated both when a proposal is created and immediately before execution.
 
-## Usage example
+## Security
 
-```text
-You: Commit the documentation update to the current branch with the message "docs: update guide"
+- Each step must contain exactly one allowed `git <subcommand> ...` command.
+- Shell control operators, command substitution, redirection, executable hooks, and unsafe Git options are rejected.
+- High-risk operations require explicit confirmation and proposals can only be executed once.
+- The plugin follows the Shell and sandbox policies provided by DeepSeek Harness; use it only with trusted repositories and trusted Git configuration.
 
-Proposal:
-1. git add docs/guide.md
-2. git commit -m "docs: update guide"
+Please report vulnerabilities privately by following [SECURITY.md](SECURITY.md).
+
+## Development
+
+Requires Node.js `^22.19.0 || >=24.0.0`, Git, and a DeepSeek Harness developer preview release that supports static Cordis plugins.
+
+```sh
+npm install
+npm run check
+npm pack --dry-run --ignore-scripts
 ```
-
-With direct execution, the Host runs each step and displays its result. With manual execution, multi-step commands are joined with `&&` so execution stops on failure. The panel marks the operation as verified only after the expected target-state transition is observed relative to the baseline captured when the commands were copied.
-
-## Security model
-
-The plugin treats model output as untrusted input and validates it twice: once during registration and again before execution.
-
-1. Each step must contain exactly one `git <subcommand> ...` command, and the subcommand must be included in a fixed allowlist.
-2. Arguments are parsed and then safely quoted again for the shell. Semicolons, ampersands, pipes, redirections, `$()`, backticks, and newlines are prohibited.
-3. Git global options such as `git -c`, unknown external `git-*` programs, `rebase --exec`, `ext::` transports, and options that may launch external programs are prohibited.
-4. High-risk operations require explicit confirmation. A `proposalId` is strictly bound to one session and can be executed only once.
-5. RPC endpoints accept only JSON POST requests, reject obvious cross-site requests, and limit request-body and identity-field sizes.
-6. Common credential formats are redacted from remote URLs and diagnostic output. Always use a Git credential manager; never place tokens in commands or remote URLs.
-
-Security boundaries and known limitations:
-
-- Commands run within the Shell and sandbox policies provided by Harness. The plugin does not expand those policies, but it is not a replacement for host-level permission isolation.
-- Git itself may read repository or user configuration and invoke hooks, credential helpers, pagers, transport helpers, or other external programs. Use this plugin only with trusted repositories and trusted Git configuration.
-- Proposals are stored in Host memory and are lost when the process restarts. This is not a persistent task queue.
-- Manual execution validation is not a terminal audit. For commands without a reliably observable target state, the plugin reports only that a change was detected and does not claim that the command was executed.
-- The subcommand allowlist is intentionally conservative. Commands with additional execution surfaces, such as `config` and `submodule`, are not accepted.
-
-Report security vulnerabilities privately by following [SECURITY.md](SECURITY.md). Do not disclose exploit details in a public issue.
-
-## Development and testing
-
-```bash
-npm run lint                              # Syntax checks
-npm test                                  # Unit and integration tests
-npm run check                             # Lint and tests
-npm pack --dry-run --ignore-scripts       # Inspect package contents
-```
-
-The test suite includes pure-logic unit tests and integration tests that use real temporary Git repositories. It covers command boundaries, risk classification, session isolation, replay prevention, step failure handling, sensitive-data redaction, and manual-execution state transitions. The tests do not access the network.
-
-Project structure:
-
-| Path | Description |
-| --- | --- |
-| `lib/index.js` | Host plugin, tools, RPC, security validation, and execution |
-| `lib/client.js` | Web Client panel |
-| `test/unit.test.js` | Unit tests for commands, risk, sessions, and RPC |
-| `test/integration.test.js` | Integration tests using real temporary Git repositories |
-| `git-guide.cordis.yml` | Automatically merged Cordis patch |
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. Run `npm run check` before publishing; `prepublishOnly` runs the same checks automatically.
 
 ## License
 

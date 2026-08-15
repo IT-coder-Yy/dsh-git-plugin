@@ -1,19 +1,38 @@
 'use strict'
 /**
- * 集成测试：在真实临时 git 仓库里跑插件的核心流程
- * （步骤执行 / 预期结果校验 / 部分执行检测 / 指纹变化），
- * 通过 child_process 提供 shell 适配器代替 harness 的 ctx.get('shell')。
- * 运行：node --test test/
+ * Integration tests for the core plugin flow in real temporary Git repositories:
+ * step execution, expected-state verification, partial execution, and fingerprint
+ * changes. A child_process adapter stands in for Harness's shell service.
  */
 const { test } = require('node:test')
 const assert = require('node:assert')
 const { execFileSync } = require('node:child_process')
+const { EventEmitter } = require('node:events')
 const fs = require('node:fs')
 const path = require('node:path')
-const { helpers } = require('../lib')
+const plugin = require('../lib')
+const { helpers } = plugin
 const { makeShell, createRepo, cleanup } = require('./helpers')
 
 const { deriveChecks, runChecks, verifyProposal, executeProposalSteps, executeRegisteredProposal, captureFingerprint, storeProposal, findProposal, proposalView, latestPending } = helpers
+
+function callHttp(handler, body) {
+  return new Promise((resolve) => {
+    const req = new EventEmitter()
+    req.method = 'POST'
+    req.headers = { 'content-type': 'application/json' }
+    const res = {
+      status: 0,
+      writeHead(status) { this.status = status },
+      end(text) { resolve({ status: this.status, body: JSON.parse(text) }) },
+    }
+    handler(req, res)
+    queueMicrotask(() => {
+      req.emit('data', Buffer.from(JSON.stringify(body)))
+      req.emit('end')
+    })
+  })
+}
 
 test('提交流程：add+commit 两步执行 → 逐步成功 → 预期校验全部通过', async () => {
   const dir = createRepo()
@@ -38,7 +57,7 @@ test('部分执行：只 add 不 commit → commit-msg 校验失败（对应面�
   try {
     const shell = makeShell(dir)
     fs.writeFileSync(path.join(dir, 'b.txt'), 'world\n')
-    execFileSync('git', ['add', '-f', 'b.txt'], { cwd: dir }) // 模拟用户只执行了第一步
+    execFileSync('git', ['add', '-f', 'b.txt'], { cwd: dir }) // Simulate a user who ran only the first step.
 
     const checks = deriveChecks(['git add -f b.txt', 'git commit -m "fix: hello"'])
     assert.deepStrictEqual(checks.map((c) => c.type), ['commit-msg'])
@@ -81,7 +100,7 @@ test('执行失败即停：第一步成功、第二步失败 → ok=false 且第
   try {
     const shell = makeShell(dir)
     fs.writeFileSync(path.join(dir, 'b.txt'), 'world\n')
-    // 第二步 commit 一个不存在的文件会失败
+    // The second step fails because it commits a nonexistent path.
     const proposal = { workdir: dir, steps: [
       { command: 'git add -f b.txt', result: null },
       { command: 'git commit -m "x" -- nonexistent.txt', result: null },
@@ -108,7 +127,7 @@ test('提议存储：登记 / 查找 / 新提议顶替旧提议', () => {
   assert.strictEqual(view.steps.length, 1)
   assert.strictEqual(latestPending('s1').proposalId, 'p2')
 
-  // 模拟 git_propose 顶替：新提议把旧的 pending 全部标记 closed
+  // Simulate git_propose replacement by closing every previous pending proposal.
   const prev = [{ proposalId: 'p1', closed: false }, { proposalId: 'p2', closed: false }]
   for (const pp of prev) pp.closed = true
   storeProposal('s1', mk('p3', 3))
@@ -204,5 +223,239 @@ test('执行失败自动生成并登记修正提议（.gitignore 忽略 → add 
     assert.strictEqual(next.recovery, true)
     assert.strictEqual(next.command, 'git add -f b.txt')
     assert.strictEqual(next.status, 'pending')
+  } finally { cleanup(dir) }
+})
+
+test('结构化仓库 Action 受会话工作目录约束，并对 operationId 去重', async () => {
+  const dir = createRepo()
+  try {
+    fs.writeFileSync(path.join(dir, 'work.txt'), 'pending\n')
+    fs.mkdirSync(path.join(dir, 'nested-cache'))
+    fs.writeFileSync(path.join(dir, 'nested-cache', 'cache.txt'), 'nested pending\n')
+    const registered = []
+    let route
+    let addRuns = 0
+    let forceUnstageFailure = false
+    const baseShell = makeShell(dir)
+    const shell = {
+      resolve: baseShell.resolve,
+      run: async (spec) => {
+        if (spec.command === "git add -- 'work.txt'") addRuns += 1
+        if (forceUnstageFailure && spec.command === 'git reset HEAD -- :/') {
+          return { exitCode: 1, stderr: { text: 'fatal: simulated unstage failure' }, stdout: { text: '' } }
+        }
+        return baseShell.run(spec)
+      },
+    }
+    const session = { cwd: dir }
+    plugin.apply({
+      get: (key) => {
+        if (key === 'shell') return shell
+        if (key === 'tools') return { register: (definition) => registered.push(definition) }
+        if (key === 'agents') return { get: (id) => id === 'workbench-session' ? { session } : undefined }
+        return null
+      },
+      inject: (_deps, callback) => callback({ get: () => ({ register: (definition) => { route = definition } }) }),
+    })
+
+    const summary = await callHttp(route.handler, { action: 'get-summary', sessionId: 'workbench-session' })
+    assert.strictEqual(summary.status, 200)
+    assert.strictEqual(summary.body.ok, true)
+    assert.strictEqual(summary.body.data.topLevel, dir)
+    assert.match(summary.body.data.head, /^[0-9a-f]+$/)
+    assert.ok(summary.body.data.files.some((file) => file.path === 'work.txt'))
+    assert.ok(summary.body.data.files.some((file) => file.path === 'nested-cache/cache.txt'), '未跟踪目录应列出其内部文件，供前端构建可展开目录树')
+
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: dir })
+    execFileSync('git', ['tag', 'v1.0.0'], { cwd: dir })
+    const references = await callHttp(route.handler, { action: 'get-branches', sessionId: 'workbench-session' })
+    assert.strictEqual(references.body.ok, true)
+    assert.ok(references.body.data.branches.some((branch) => branch.name === 'main' && branch.current))
+    assert.ok(references.body.data.remotes.some((remote) => remote.name === 'origin/main'))
+    assert.ok(references.body.data.tags.some((tag) => tag.name === 'v1.0.0' && tag.hash))
+
+    const untrackedDiff = await callHttp(route.handler, { action: 'get-diff', sessionId: 'workbench-session', path: 'work.txt', staged: false })
+    assert.strictEqual(untrackedDiff.body.ok, true)
+    assert.match(untrackedDiff.body.data.diff, /^\+pending$/m)
+
+    const firstStage = await callHttp(route.handler, { action: 'stage-paths', sessionId: 'workbench-session', operationId: 'stage-work-file', paths: ['work.txt'] })
+    const repeatedStage = await callHttp(route.handler, { action: 'stage-paths', sessionId: 'workbench-session', operationId: 'stage-work-file', paths: ['work.txt'] })
+    assert.strictEqual(firstStage.body.ok, true)
+    assert.strictEqual(repeatedStage.body.ok, true)
+    assert.strictEqual(addRuns, 1, 'the same operationId must not stage the file twice')
+
+    const unstageAll = await callHttp(route.handler, { action: 'unstage-all', sessionId: 'workbench-session', operationId: 'unstage-all-work-file' })
+    assert.strictEqual(unstageAll.body.ok, true)
+    assert.strictEqual(unstageAll.body.data.stagedCount, 0)
+    const stageAgain = await callHttp(route.handler, { action: 'stage-paths', sessionId: 'workbench-session', operationId: 'stage-work-file-again', paths: ['work.txt'] })
+    assert.strictEqual(stageAgain.body.ok, true)
+
+    const traversal = await callHttp(route.handler, { action: 'stage-paths', sessionId: 'workbench-session', operationId: 'invalid-path', paths: ['../outside.txt'] })
+    assert.deepStrictEqual(traversal.body, { ok: false, code: 'INVALID_ARGUMENT', message: 'paths 必须包含 1–100 个仓库内相对路径' })
+
+    const commit = await callHttp(route.handler, { action: 'commit', sessionId: 'workbench-session', operationId: 'commit-work-file', message: 'feat: structured action' })
+    assert.strictEqual(commit.body.ok, true)
+    assert.strictEqual(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: dir, encoding: 'utf8' }).trim(), 'feat: structured action')
+
+    const createBranch = await callHttp(route.handler, { action: 'create-branch', sessionId: 'workbench-session', operationId: 'create-feature-branch', name: 'feat/action-api', base: 'main' })
+    assert.strictEqual(createBranch.body.ok, true, JSON.stringify(createBranch.body))
+    assert.strictEqual(createBranch.body.data.branch, 'feat/action-api')
+    fs.writeFileSync(path.join(dir, 'feature-only.txt'), 'not merged\n')
+    execFileSync('git', ['add', 'feature-only.txt'], { cwd: dir })
+    execFileSync('git', ['commit', '-q', '-m', 'feat: feature only'], { cwd: dir })
+
+    const switchBranch = await callHttp(route.handler, { action: 'switch-branch', sessionId: 'workbench-session', operationId: 'switch-main', name: 'main' })
+    assert.strictEqual(switchBranch.body.ok, true)
+    assert.strictEqual(switchBranch.body.data.branch, 'main')
+
+    const commits = await callHttp(route.handler, { action: 'get-commits', sessionId: 'workbench-session', limit: 20 })
+    assert.strictEqual(commits.body.ok, true)
+    assert.strictEqual(commits.body.data[0].subject, 'feat: structured action', '当前分支的最新提交应显示在顶部')
+    assert.ok(commits.body.data[0].parents.length > 0, '提交记录应包含父提交，供前端绘制拓扑图')
+    assert.ok(commits.body.data[0].refs.some((ref) => ref.name === 'main' && ref.type === 'branch' && ref.current), '当前分支应带有明确的当前分支引用')
+    assert.ok(!commits.body.data.some((entry) => entry.subject === 'feat: feature only'), '当前分支历史不得混入其他分支的独立提交')
+    assert.ok(!commits.body.data.some((entry) => entry.refs.some((ref) => ref.name === 'feat/action-api')), '提交记录不得显示其他本地分支标签')
+
+    const commitHash = commits.body.data[0].hash
+    const detail = await callHttp(route.handler, { action: 'get-commit-detail', sessionId: 'workbench-session', hash: commitHash })
+    assert.strictEqual(detail.body.ok, true, JSON.stringify(detail.body))
+    assert.strictEqual(detail.body.data.hash, commitHash)
+    assert.strictEqual(detail.body.data.subject, 'feat: structured action')
+    assert.strictEqual(detail.body.data.comparisonBase, detail.body.data.parents[0])
+    assert.ok(detail.body.data.files.some((file) => file.path === 'work.txt' && file.status === 'A' && file.additions === 1))
+    assert.ok(detail.body.data.totals.additions >= 1)
+
+    const commitDiff = await callHttp(route.handler, { action: 'get-commit-diff', sessionId: 'workbench-session', hash: commitHash })
+    assert.strictEqual(commitDiff.body.ok, true)
+    assert.strictEqual(commitDiff.body.data.comparisonBase, detail.body.data.parents[0])
+    assert.match(commitDiff.body.data.diff, /diff --git a\/work\.txt b\/work\.txt/)
+    assert.match(commitDiff.body.data.diff, /^\+pending$/m)
+
+    const rootHash = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+    const rootDetail = await callHttp(route.handler, { action: 'get-commit-detail', sessionId: 'workbench-session', hash: rootHash })
+    assert.strictEqual(rootDetail.body.ok, true)
+    assert.strictEqual(rootDetail.body.data.comparisonBase, null)
+    assert.ok(rootDetail.body.data.files.some((file) => file.path === 'a.txt' && file.status === 'A'))
+    const rootDiff = await callHttp(route.handler, { action: 'get-commit-diff', sessionId: 'workbench-session', hash: rootHash })
+    assert.strictEqual(rootDiff.body.ok, true)
+    assert.strictEqual(rootDiff.body.data.comparisonBase, null)
+    assert.match(rootDiff.body.data.diff, /diff --git a\/a\.txt b\/a\.txt/)
+
+    const invalidCommit = await callHttp(route.handler, { action: 'get-commit-detail', sessionId: 'workbench-session', hash: 'HEAD' })
+    assert.deepStrictEqual(invalidCommit.body, { ok: false, code: 'INVALID_ARGUMENT', message: '提交哈希必须是完整的 40 或 64 位十六进制字符' })
+    const missingCommit = await callHttp(route.handler, { action: 'get-commit-detail', sessionId: 'workbench-session', hash: '0'.repeat(40) })
+    assert.strictEqual(missingCommit.body.ok, false)
+    assert.strictEqual(missingCommit.body.code, 'GIT_FAILED')
+
+    execFileSync('git', ['branch', 'merged/delete-me'], { cwd: dir })
+    const mergedDelete = await callHttp(route.handler, { action: 'delete-branch', sessionId: 'workbench-session', operationId: 'safe-delete-merged', name: 'merged/delete-me' })
+    assert.strictEqual(mergedDelete.body.ok, true, '已合并分支应允许安全删除')
+
+    const safeDelete = await callHttp(route.handler, { action: 'delete-branch', sessionId: 'workbench-session', operationId: 'safe-delete-feature', name: 'feat/action-api' })
+    assert.strictEqual(safeDelete.body.ok, false)
+    assert.strictEqual(safeDelete.body.code, 'STATE_CONFLICT')
+    assert.strictEqual(safeDelete.body.reason, 'UNMERGED_BRANCH')
+
+    const currentDelete = await callHttp(route.handler, { action: 'delete-branch', sessionId: 'workbench-session', operationId: 'delete-current-main', name: 'main' })
+    assert.deepStrictEqual(currentDelete.body, {
+      ok: false, code: 'STATE_CONFLICT', message: '当前分支不能删除，请先切换到其他分支', reason: 'CURRENT_BRANCH',
+    })
+
+    const unconfirmedForceDelete = await callHttp(route.handler, {
+      action: 'delete-branch', sessionId: 'workbench-session', operationId: 'unconfirmed-force-delete-feature',
+      name: 'feat/action-api', force: true, confirmRisk: false,
+    })
+    assert.deepStrictEqual(unconfirmedForceDelete.body, {
+      ok: false, code: 'PERMISSION_DENIED', message: '强制删除前必须确认未合并提交可能永久丢失',
+    })
+
+    const forceDelete = await callHttp(route.handler, {
+      action: 'delete-branch', sessionId: 'workbench-session', operationId: 'force-delete-feature',
+      name: 'feat/action-api', force: true, confirmRisk: true,
+    })
+    assert.strictEqual(forceDelete.body.ok, true)
+    assert.ok(!execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: dir, encoding: 'utf8' }).split('\n').includes('feat/action-api'))
+
+    execFileSync('git', ['switch', '-q', '-c', 'feat/merge-detail'], { cwd: dir })
+    fs.writeFileSync(path.join(dir, 'merge-detail.txt'), 'from feature\n')
+    execFileSync('git', ['add', 'merge-detail.txt'], { cwd: dir })
+    execFileSync('git', ['commit', '-q', '-m', 'feat: merge detail'], { cwd: dir })
+    execFileSync('git', ['switch', '-q', 'main'], { cwd: dir })
+    fs.writeFileSync(path.join(dir, 'main-detail.txt'), 'from main\n')
+    execFileSync('git', ['add', 'main-detail.txt'], { cwd: dir })
+    execFileSync('git', ['commit', '-q', '-m', 'chore: main detail'], { cwd: dir })
+    const firstParent = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+    execFileSync('git', ['merge', '-q', '--no-ff', '-m', 'merge: detail test', 'feat/merge-detail'], { cwd: dir })
+    const mergeHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+    const mergeDetail = await callHttp(route.handler, { action: 'get-commit-detail', sessionId: 'workbench-session', hash: mergeHash })
+    assert.strictEqual(mergeDetail.body.ok, true)
+    assert.strictEqual(mergeDetail.body.data.parents.length, 2)
+    assert.strictEqual(mergeDetail.body.data.comparisonBase, firstParent)
+    assert.ok(mergeDetail.body.data.files.some((file) => file.path === 'merge-detail.txt'))
+    assert.ok(!mergeDetail.body.data.files.some((file) => file.path === 'main-detail.txt'), '合并提交应只与第一父提交比较')
+    const mergeDiff = await callHttp(route.handler, { action: 'get-commit-diff', sessionId: 'workbench-session', hash: mergeHash })
+    assert.strictEqual(mergeDiff.body.ok, true)
+    assert.strictEqual(mergeDiff.body.data.comparisonBase, firstParent)
+    assert.match(mergeDiff.body.data.diff, /merge-detail\.txt/)
+
+    forceUnstageFailure = true
+    const failedUnstage = await callHttp(route.handler, { action: 'unstage-all', sessionId: 'workbench-session', operationId: 'failed-unstage-all' })
+    assert.deepStrictEqual(failedUnstage.body, {
+      ok: false,
+      code: 'GIT_FAILED',
+      message: '取消全部暂存失败',
+      diagnostics: 'fatal: simulated unstage failure',
+    })
+  } finally { cleanup(dir) }
+})
+
+test('只读贮藏列表按最新顺序返回并保持仓库状态', async () => {
+  const dir = createRepo()
+  try {
+    let route
+    let stashListCommand = ''
+    const baseShell = makeShell(dir)
+    const shell = {
+      resolve: baseShell.resolve,
+      run: async (spec) => {
+        if (spec.command.startsWith('git stash list ')) stashListCommand = spec.command
+        return baseShell.run(spec)
+      },
+    }
+    const session = { cwd: dir }
+    plugin.apply({
+      get: (key) => {
+        if (key === 'shell') return shell
+        if (key === 'tools') return { register() {} }
+        if (key === 'agents') return { get: (id) => id === 'stash-session' ? { session } : undefined }
+        return null
+      },
+      inject: (_deps, callback) => callback({ get: () => ({ register: (definition) => { route = definition } }) }),
+    })
+
+    const empty = await callHttp(route.handler, { action: 'get-stashes', sessionId: 'stash-session' })
+    assert.deepStrictEqual(empty.body, { ok: true, data: [] })
+
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'first stash\n')
+    execFileSync('git', ['stash', 'push', '-q', '-m', 'first snapshot'], { cwd: dir })
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'second stash\n')
+    execFileSync('git', ['stash', 'push', '-q', '-m', 'second snapshot'], { cwd: dir })
+    const before = execFileSync('git', ['status', '--porcelain=v1'], { cwd: dir, encoding: 'utf8' })
+
+    const response = await callHttp(route.handler, { action: 'get-stashes', sessionId: 'stash-session' })
+    assert.strictEqual(response.body.ok, true)
+    assert.strictEqual(response.body.data.length, 2)
+    assert.strictEqual(response.body.data[0].selector, 'stash@{0}')
+    assert.match(response.body.data[0].subject, /second snapshot/)
+    assert.strictEqual(response.body.data[1].selector, 'stash@{1}')
+    assert.match(response.body.data[1].subject, /first snapshot/)
+    assert.match(response.body.data[0].hash, /^[0-9a-f]{40,64}$/)
+    assert.strictEqual(response.body.data[0].author, 'test')
+    assert.match(response.body.data[0].date, /^\d{4}-\d{2}-\d{2}T/)
+    assert.match(stashListCommand, /--max-count=100/)
+    assert.strictEqual(execFileSync('git', ['status', '--porcelain=v1'], { cwd: dir, encoding: 'utf8' }), before)
+
+    const missingSession = await callHttp(route.handler, { action: 'get-stashes', sessionId: 'missing-session' })
+    assert.deepStrictEqual(missingSession.body, { ok: false, code: 'SESSION_NOT_FOUND', message: '无法确定当前会话的仓库目录' })
   } finally { cleanup(dir) }
 })

@@ -1,0 +1,34 @@
+import { createPanelController } from './panel-controller';
+import { appendCommandLog, beginTrackedRequest, buildFileTree, cancelTrackedRequest, clampWorkbenchRatio, commitFileTone, deriveCommitGraph, filterLocalBranches, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, parseReviewRows, repositoryName, type AnyRecord } from './view-model';
+type RefreshState = 'idle' | 'loading' | 'succeeded' | 'failed';
+declare function injectStyles(): () => void;
+declare function refreshButtonLabel(state: RefreshState): string;
+declare function renderRawDiffSurface(diff: string): any;
+declare function renderReviewSurface(diff: string): any;
+declare const plugin: {
+    inject: string[];
+    apply(ctx: AnyRecord): void;
+    __testing: {
+        createPanelController: typeof createPanelController;
+        buildFileTree: typeof buildFileTree;
+        parseReviewRows: typeof parseReviewRows;
+        renderRawDiffSurface: typeof renderRawDiffSurface;
+        renderReviewSurface: typeof renderReviewSurface;
+        injectStyles: typeof injectStyles;
+        filterLocalBranches: typeof filterLocalBranches;
+        clampWorkbenchRatio: typeof clampWorkbenchRatio;
+        deriveCommitGraph: typeof deriveCommitGraph;
+        repositoryName: typeof repositoryName;
+        mutationCommand: typeof mutationCommand;
+        appendCommandLog: typeof appendCommandLog;
+        refreshButtonLabel: typeof refreshButtonLabel;
+        isCurrentCommitRequest: typeof isCurrentCommitRequest;
+        nextCommitSelection: typeof nextCommitSelection;
+        commitFileTone: typeof commitFileTone;
+        isLatestRequest: typeof isLatestRequest;
+        beginTrackedRequest: typeof beginTrackedRequest;
+        cancelTrackedRequest: typeof cancelTrackedRequest;
+        isTrackedRequestCurrent: typeof isTrackedRequestCurrent;
+    };
+};
+export = plugin;

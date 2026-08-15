@@ -1,12 +1,19 @@
 {
-  "name": "deepseek-git-guide",
-  "version": "0.1.0",
-  "description": "DeepSeek Harness Cordis 插件（静态 npm 包形态）：把用户对 git 操作的自然语言描述，转成最简洁安全的命令建议与解释，并让用户在「直接执行 / 手动执行」之间选择。",
+  "name": "dsh-easygit-plugin",
+  "version": "0.2.0",
+  "description": "面向 DeepSeek Harness Web 的可视化 Git 工作台，支持查看仓库状态与提交记录、快捷执行常用 Git 操作，以及安全运行自然语言生成的分步骤命令提议。",
   "license": "MIT",
   "main": "lib/index.js",
+  "types": "lib/types/host/index.d.ts",
   "exports": {
-    ".": "./lib/index.js",
-    "./client": "./lib/client.js",
+    ".": {
+      "types": "./lib/types/host/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -16,7 +23,9 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime"
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-layout"
       ]
     }
   },
@@ -32,16 +41,19 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/IT-coder-Yy/deepseek-git-guide.git"
+    "url": "git+https://github.com/IT-coder-Yy/dsh-git-plugin.git"
   },
-  "homepage": "https://github.com/IT-coder-Yy/deepseek-git-guide#readme",
+  "homepage": "https://github.com/IT-coder-Yy/dsh-git-plugin#readme",
   "bugs": {
-    "url": "https://github.com/IT-coder-Yy/deepseek-git-guide/issues"
+    "url": "https://github.com/IT-coder-Yy/dsh-git-plugin/issues"
   },
   "files": [
-    "lib",
+    "assets/preview.png",
+    "lib/*.js",
+    "lib/types/**/*.d.ts",
     "git-guide.cordis.yml",
     "README.md",
+    "README.zh-CN.md",
     "SECURITY.md",
     "LICENSE"
   ],
@@ -49,9 +61,19 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "lint": "node --check lib/index.js && node --check lib/client.js",
-    "test": "node --test \"test/*.test.js\"",
-    "check": "npm run lint && npm test",
-    "prepublishOnly": "npm run check"
+    "typecheck": "tsc --project tsconfig.json",
+    "build:js": "node scripts/build.mjs",
+    "build": "npm run typecheck && npm run build:js",
+    "lint": "npm run typecheck && node --check lib/index.js && node --check lib/client.js",
+    "test": "npm run build && node --test \"test/*.test.js\"",
+    "verify:build": "node scripts/verify-build.mjs",
+    "check": "npm run lint && npm test && npm run verify:build",
+    "prepublishOnly": "npm run lint && npm test && npm run verify:build && npm pack --dry-run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "@types/react": "^18.3.1",
+    "esbuild": "^0.27.0",
+    "typescript": "^6.0.3"
   }
 }

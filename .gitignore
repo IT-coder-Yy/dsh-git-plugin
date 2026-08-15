@@ -5,6 +5,11 @@ build/
 *.log
 *.tgz
 coverage/
+*.map
+
+# 仅供本地开发与发布验收的内部文档
+/docs/git-workbench-refactor-plan.zh-CN.md
+/docs/release-test-checklist.zh-CN.md
 
 # 本地环境变量（示例文件可显式保留）
 .env

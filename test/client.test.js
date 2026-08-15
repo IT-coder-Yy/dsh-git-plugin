@@ -3,14 +3,13 @@
 const { test } = require('node:test')
 const assert = require('node:assert')
 
-test('Client 模块可加载，并声明 slots/timer 后注册 dock', () => {
+function loadClientPlugin() {
   let clientPlugin
-  let registered
   const react = { createElement: (...args) => ({ args }) }
   global.window = {
     __ModuleLoader__: {
       load(definition) {
-        assert.strictEqual(definition.id, 'deepseek-git-guide')
+        assert.strictEqual(definition.id, 'dsh-easygit-plugin')
         clientPlugin = definition.factory((name) => {
           assert.strictEqual(name, 'react')
           return react
@@ -24,20 +23,362 @@ test('Client 模块可加载，并声明 slots/timer 后注册 dock', () => {
   } finally {
     delete global.window
   }
+  return clientPlugin
+}
 
-  assert.deepStrictEqual(clientPlugin.inject, ['slots', 'timer'])
+test('Client 注册输入框工具栏动作与 details 生命周期', () => {
+  const clientPlugin = loadClientPlugin()
+  assert.deepStrictEqual(clientPlugin.inject, ['slots', 'timer', 'layout'])
+
+  const injections = []
+  const registered = []
   const slots = {
     inject(name, callback) {
-      assert.strictEqual(name, 'conversation.input.dock')
+      injections.push(name)
       return callback()
     },
     register(definition, renderer) {
-      registered = { definition, renderer }
+      registered.push({ definition, renderer })
       return () => {}
     },
   }
   const timer = { interval: () => () => {}, timeout: () => () => {} }
-  clientPlugin.apply({ get: (key) => key === 'slots' ? slots : key === 'timer' ? timer : undefined, timer })
-  assert.strictEqual(registered.definition.id, 'git-guide')
-  assert.strictEqual(typeof registered.renderer, 'function')
+  const layout = { openDetails() {}, closeDetails() {} }
+  clientPlugin.apply({
+    get: (key) => key === 'slots' ? slots : key === 'timer' ? timer : key === 'layout' ? layout : undefined,
+    effect: (callback) => callback(),
+    timer,
+  })
+
+  assert.deepStrictEqual(injections, ['details', 'conversation.input.left'])
+  assert.strictEqual(registered.length, 1)
+  assert.deepStrictEqual(registered[0].definition, {
+    name: 'conversation.input.left', id: 'git-workbench', order: 30, label: 'Git 工作台',
+  })
+  assert.strictEqual(typeof registered[0].renderer, 'function')
+})
+
+test('Panel Controller 用临时低优先级 details 注册打开，并在关闭和声明卸载时释放', () => {
+  const clientPlugin = loadClientPlugin()
+  const registrations = []
+  const layoutCalls = []
+  let releaseCount = 0
+  const slots = {
+    register(definition, renderer) {
+      registrations.push({ definition, renderer })
+      return () => { releaseCount += 1 }
+    },
+  }
+  const layout = {
+    openDetails() { layoutCalls.push('open') },
+    closeDetails() { layoutCalls.push('close') },
+  }
+  const controller = clientPlugin.__testing.createPanelController({
+    slots,
+    layout,
+    renderPanel: (props) => ({ panelFor: props.sessionId }),
+  })
+
+  const detachDetails = controller.attachDetails()
+  assert.strictEqual(controller.open('session-a'), true)
+  assert.strictEqual(controller.isOpen('session-a'), true)
+  assert.deepStrictEqual(registrations[0].definition, { name: 'details', priority: -10 })
+  assert.deepStrictEqual(registrations[0].renderer({ sessionId: 'session-a' }), { panelFor: 'session-a' })
+  assert.strictEqual(registrations[0].renderer({ sessionId: 'session-b' }), null, '切换会话时不得渲染上一会话的工作台')
+  assert.deepStrictEqual(layoutCalls, ['open'])
+
+  assert.strictEqual(controller.toggle('session-a'), true)
+  assert.strictEqual(controller.isOpen('session-a'), false)
+  assert.deepStrictEqual(layoutCalls, ['open', 'close'])
+  assert.strictEqual(releaseCount, 1)
+
+  assert.strictEqual(controller.open('session-b'), true)
+  detachDetails()
+  assert.strictEqual(controller.snapshot().detailsReady, false)
+  assert.strictEqual(controller.snapshot().open, false)
+  assert.strictEqual(releaseCount, 2)
+  assert.deepStrictEqual(layoutCalls, ['open', 'close', 'open', 'close'])
+})
+
+test('变更文件按目录树归类，并保留根目录文件', () => {
+  const clientPlugin = loadClientPlugin()
+  const tree = clientPlugin.__testing.buildFileTree([
+    { path: 'src/client/index.ts' },
+    { path: 'src/host/index.ts' },
+    { path: 'README.md' },
+  ])
+
+  assert.deepStrictEqual(tree.files.map((file) => file.path), ['README.md'])
+  assert.deepStrictEqual(tree.folders.map((folder) => folder.name), ['src'])
+  assert.deepStrictEqual(tree.folders[0].folders.map((folder) => folder.name), ['client', 'host'])
+  assert.strictEqual(tree.folders[0].folders[0].files[0].path, 'src/client/index.ts')
+})
+
+test('未跟踪目录路径本身也会渲染为可展开文件夹', () => {
+  const clientPlugin = loadClientPlugin()
+  const tree = clientPlugin.__testing.buildFileTree([{ path: '__pycache__/' }])
+
+  assert.deepStrictEqual(tree.files, [])
+  assert.deepStrictEqual(tree.folders.map((folder) => folder.name), ['__pycache__'])
+  assert.deepStrictEqual(tree.folders[0].files, [])
+})
+
+test('文件审阅行保留双行号、修改内容和被省略的上下文', () => {
+  const clientPlugin = loadClientPlugin()
+  const rows = clientPlugin.__testing.parseReviewRows([
+    'diff --git a/demo.txt b/demo.txt',
+    '@@ -2,3 +2,4 @@',
+    ' keep',
+    '-old value',
+    '+new value',
+    '+inserted value',
+    ' tail',
+    '@@ -10,2 +11,2 @@',
+    ' later',
+    '-before',
+    '+after',
+  ].join('\n'))
+
+  assert.deepStrictEqual(rows[0], { kind: 'skipped', oldNumber: null, newNumber: null, text: '1 行未修改内容（由 Git 省略）' })
+  assert.deepStrictEqual(rows.slice(1, 6), [
+    { kind: 'context', oldNumber: 2, newNumber: 2, text: 'keep' },
+    { kind: 'deleted', oldNumber: 3, newNumber: null, text: 'old value' },
+    { kind: 'added', oldNumber: null, newNumber: 3, text: 'new value' },
+    { kind: 'added', oldNumber: null, newNumber: 4, text: 'inserted value' },
+    { kind: 'context', oldNumber: 4, newNumber: 5, text: 'tail' },
+  ])
+  assert.deepStrictEqual(rows[6], { kind: 'skipped', oldNumber: null, newNumber: null, text: '5 行未修改内容（由 Git 省略）' })
+  assert.ok(rows.some((row) => row.kind === 'deleted' && row.text === 'before'))
+  assert.ok(rows.some((row) => row.kind === 'added' && row.text === 'after'))
+})
+
+test('文件审阅在纯删除块之后正确计算省略的未修改行', () => {
+  const clientPlugin = loadClientPlugin()
+  const rows = clientPlugin.__testing.parseReviewRows([
+    '@@ -10 +10,0 @@',
+    '-removed',
+    '@@ -20 +19 @@',
+    '-before',
+    '+after',
+  ].join('\n'))
+
+  assert.deepStrictEqual(rows[2], { kind: 'skipped', oldNumber: null, newNumber: null, text: '9 行未修改内容（由 Git 省略）' })
+})
+
+test('Diff 的审阅与原始视图共享完整滚动宽度', () => {
+  const clientPlugin = loadClientPlugin()
+  const raw = clientPlugin.__testing.renderRawDiffSurface([
+    '@@ -1,2 +1,2 @@',
+    '-short',
+    '+a very long replacement line that determines the horizontal scroll width',
+  ].join('\n'))
+  const review = clientPlugin.__testing.renderReviewSurface([
+    '@@ -1,2 +1,2 @@',
+    '-short',
+    '+a very long replacement line that determines the horizontal scroll width',
+  ].join('\n'))
+
+  assert.strictEqual(raw.args[0], 'code')
+  assert.strictEqual(raw.args[1].className, 'gg-diff-content')
+  assert.strictEqual(review.args[0], 'div')
+  assert.strictEqual(review.args[1].className, 'gg-review-content')
+
+  let styleTag
+  global.document = {
+    getElementById: () => null,
+    createElement: () => { styleTag = { textContent: '', remove() {} }; return styleTag },
+    head: { appendChild() {} },
+  }
+  try {
+    clientPlugin.__testing.injectStyles()
+  } finally {
+    delete global.document
+  }
+  assert.match(styleTag.textContent, /\.gg-review-content, \.gg-diff-content \{[^}]*width: max-content;[^}]*min-width: 100%; \}/)
+  assert.match(styleTag.textContent, /\.gg-review-line \{[^}]*width: 100%;/)
+  assert.match(styleTag.textContent, /\.gg-diff-code span \{[^}]*width: 100%;/)
+})
+
+test('Git 工作台入口使用 DSH 风格的无边框悬停反馈', () => {
+  const clientPlugin = loadClientPlugin()
+  let styleTag
+  global.document = {
+    getElementById: () => null,
+    createElement: () => { styleTag = { textContent: '', remove() {} }; return styleTag },
+    head: { appendChild() {} },
+  }
+  try {
+    clientPlugin.__testing.injectStyles()
+  } finally {
+    delete global.document
+  }
+
+  assert.match(styleTag.textContent, /\.gg-workbench-action \{[^}]*height: 28px;[^}]*border: 0;[^}]*background: transparent;/)
+  assert.match(styleTag.textContent, /\.gg-workbench-action:hover:not\(:disabled\) \{[^}]*box-shadow: var\(--dsw-shadow-lv1/)
+  assert.match(styleTag.textContent, /\.gg-workbench-action\[aria-pressed="true"\] \{[^}]*border: 0;[^}]*button-ghost-active-fill/)
+})
+
+test('工作台标题线、命令日志高度和变更页双栏边界使用修正后的布局', () => {
+  const clientPlugin = loadClientPlugin()
+  let styleTag
+  global.document = {
+    getElementById: () => null,
+    createElement: () => { styleTag = { textContent: '', remove() {} }; return styleTag },
+    head: { appendChild() {} },
+  }
+  try {
+    clientPlugin.__testing.injectStyles()
+  } finally {
+    delete global.document
+  }
+
+  assert.match(styleTag.textContent, /\.gg-workbench-head \{[^}]*min-height: 75px;/)
+  assert.match(styleTag.textContent, /\.gg-command-log \{[^}]*min-height: 110px;[^}]*max-height: 210px;/)
+  assert.match(styleTag.textContent, /\.gg-diff \{[^}]*box-sizing: border-box;/)
+  assert.doesNotMatch(styleTag.textContent, /\.gg-diff \{ min-height: 100%; \}/)
+})
+
+test('工作台宽度比例限制在 24% 到 75%', () => {
+  const clientPlugin = loadClientPlugin()
+  const clamp = clientPlugin.__testing.clampWorkbenchRatio
+
+  assert.strictEqual(clamp(0.1), 0.24)
+  assert.strictEqual(clamp(0.36), 0.36)
+  assert.strictEqual(clamp(0.9), 0.75)
+})
+
+test('本地分支搜索忽略大小写和首尾空格', () => {
+  const clientPlugin = loadClientPlugin()
+  const filter = clientPlugin.__testing.filterLocalBranches
+  const branches = [
+    { name: 'main', current: true },
+    { name: 'feature/Login', upstream: 'origin/feature/Login' },
+    { name: 'fix/search', upstream: 'origin/fix/search' },
+  ]
+
+  assert.strictEqual(filter(branches, ''), branches)
+  assert.deepStrictEqual(filter(branches, '  FEATURE  ').map((branch) => branch.name), ['feature/Login'])
+  assert.deepStrictEqual(filter(branches, 'search').map((branch) => branch.name), ['fix/search'])
+  assert.deepStrictEqual(filter(branches, 'origin').map((branch) => branch.name), [])
+})
+
+test('提交详情只接受当前选择的最新请求', () => {
+  const clientPlugin = loadClientPlugin()
+  const current = clientPlugin.__testing.isCurrentCommitRequest
+
+  assert.strictEqual(current('abc', 'abc', 3, 3), true)
+  assert.strictEqual(current('def', 'abc', 3, 3), false)
+  assert.strictEqual(current('abc', 'abc', 4, 3), false)
+})
+
+test('重复选择当前提交会收起详情', () => {
+  const clientPlugin = loadClientPlugin()
+  const next = clientPlugin.__testing.nextCommitSelection
+
+  assert.strictEqual(next('', 'abc'), 'abc')
+  assert.strictEqual(next('abc', 'def'), 'def')
+  assert.strictEqual(next('abc', 'abc'), '')
+})
+
+test('提交文件状态映射为增加、删除和修改颜色', () => {
+  const clientPlugin = loadClientPlugin()
+  const tone = clientPlugin.__testing.commitFileTone
+
+  assert.strictEqual(tone('A'), ' added')
+  assert.strictEqual(tone('C100'), ' added')
+  assert.strictEqual(tone('D'), ' deleted')
+  assert.strictEqual(tone('M'), ' modified')
+  assert.strictEqual(tone('R100'), ' modified')
+})
+
+test('贮藏列表只接受最新的刷新请求', () => {
+  const clientPlugin = loadClientPlugin()
+  const latest = clientPlugin.__testing.isLatestRequest
+
+  assert.strictEqual(latest(3, 3), true)
+  assert.strictEqual(latest(4, 3), false)
+})
+
+test('新只读请求会取消前一个请求，显式取消后拒绝其响应', () => {
+  const clientPlugin = loadClientPlugin()
+  const { beginTrackedRequest, cancelTrackedRequest, isTrackedRequestCurrent } = clientPlugin.__testing
+  const ref = { current: { controller: null, sequence: 0 } }
+  const first = beginTrackedRequest(ref)
+  assert.strictEqual(isTrackedRequestCurrent(ref, first), true)
+
+  const second = beginTrackedRequest(ref)
+  assert.strictEqual(first.signal.aborted, true)
+  assert.strictEqual(isTrackedRequestCurrent(ref, first), false)
+  assert.strictEqual(isTrackedRequestCurrent(ref, second), true)
+
+  cancelTrackedRequest(ref)
+  assert.strictEqual(second.signal.aborted, true)
+  assert.strictEqual(isTrackedRequestCurrent(ref, second), false)
+})
+
+test('提交图正确表达分叉、合并和根提交', () => {
+  const clientPlugin = loadClientPlugin()
+  const rows = clientPlugin.__testing.deriveCommitGraph([
+    { hash: 'A', parents: ['B', 'C'] },
+    { hash: 'B', parents: ['D'] },
+    { hash: 'C', parents: ['D'] },
+    { hash: 'D', parents: [] },
+  ])
+
+  assert.strictEqual(rows[0].lane, 0)
+  assert.deepStrictEqual(rows[0].edges, [
+    { from: 0, to: 0, active: true },
+    { from: 0, to: 1, active: true },
+  ])
+  assert.strictEqual(rows[2].lane, 1)
+  assert.ok(rows[2].edges.some((edge) => edge.from === 1 && edge.to === 0 && edge.active))
+  assert.deepStrictEqual(rows[3].edges, [{ from: 0, to: null, active: true }])
+})
+
+test('仓库顶层目录可以转换为项目名称', () => {
+  const clientPlugin = loadClientPlugin()
+  const name = clientPlugin.__testing.repositoryName
+
+  assert.strictEqual(name('/home/user/code/FastAPI/'), 'FastAPI')
+  assert.strictEqual(name('C:\\code\\demo'), 'demo')
+  assert.strictEqual(name(''), 'Git 仓库')
+})
+
+test('修改操作转换为命令日志中的真实 Git 命令', () => {
+  const clientPlugin = loadClientPlugin()
+  const command = clientPlugin.__testing.mutationCommand
+
+  assert.deepStrictEqual(command('stage-paths', { paths: ['src/a file.ts'] }), {
+    label: '暂存文件', command: "git add -- 'src/a file.ts'",
+  })
+  assert.deepStrictEqual(command('create-branch', { name: 'feature/x', base: 'main' }), {
+    label: '新建分支', command: "git switch -c 'feature/x' 'main'",
+  })
+  assert.deepStrictEqual(command('delete-branch', { name: 'feature/x', force: true }), {
+    label: '强制删除分支', command: "git branch -D -- 'feature/x'",
+  })
+  assert.strictEqual(command('get-summary'), null)
+})
+
+test('命令日志只保留最近一百条并保持执行顺序', () => {
+  const clientPlugin = loadClientPlugin()
+  const append = clientPlugin.__testing.appendCommandLog
+  let entries = []
+  for (let id = 1; id <= 105; id += 1) {
+    entries = append(entries, { id, label: '操作', command: 'git status', status: 'succeeded' })
+  }
+
+  assert.strictEqual(entries.length, 100)
+  assert.strictEqual(entries[0].id, 6)
+  assert.strictEqual(entries[99].id, 105)
+})
+
+test('手动刷新按钮明确展示进行中、成功和失败状态', () => {
+  const clientPlugin = loadClientPlugin()
+  const label = clientPlugin.__testing.refreshButtonLabel
+
+  assert.strictEqual(label('idle'), '刷新')
+  assert.strictEqual(label('loading'), '正在刷新…')
+  assert.strictEqual(label('succeeded'), '已刷新')
+  assert.strictEqual(label('failed'), '刷新失败')
 })

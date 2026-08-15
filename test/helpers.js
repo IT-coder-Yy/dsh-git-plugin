@@ -1,7 +1,7 @@
 'use strict'
 /**
- * 测试辅助：用 child_process 实现一个最小 shell 适配器，替代 harness 的 ctx.get('shell')；
- * 并提供临时 git 仓库的创建/清理。
+ * Test helpers: a minimal child_process shell adapter for ctx.get('shell') and
+ * temporary Git repository setup and cleanup.
  */
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
@@ -9,8 +9,8 @@ const os = require('node:os')
 const path = require('node:path')
 
 /**
- * 最小 shell 适配器（形状与 harness shell 服务一致：resolve → run）。
- * @param {string} cwd 默认工作目录
+ * Minimal shell adapter with the Harness resolve-to-run shape.
+ * @param {string} cwd Default working directory.
  */
 function makeShell(cwd) {
   return {
@@ -45,7 +45,7 @@ function makeShell(cwd) {
   }
 }
 
-/** 在临时目录创建一个含一次 init 提交的 git 仓库，返回仓库路径。 */
+/** Create a temporary Git repository with one initial commit and return its path. */
 function createRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-test-'))
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir })

@@ -1,18 +1,73 @@
 'use strict'
 /**
- * 单元测试：lib/index.js 导出的纯逻辑（命令校验 / 风险分级 / 预期结果推导等）。
- * 运行：node --test test/
+ * Unit tests for pure helpers exported by lib/index.js: command validation,
+ * risk classification, expected-state derivation, and related utilities.
  */
 const { test } = require('node:test')
 const assert = require('node:assert')
 const { EventEmitter } = require('node:events')
+const { existsSync, readFileSync } = require('node:fs')
+const { join } = require('node:path')
 const plugin = require('../lib')
 const { helpers } = plugin
 
-const { parseCommand, validateCommand, classifyRisk, classifyStepsRisk, redactSecrets, redactAndLimit, addPathsOf, deriveChecks } = helpers
+const { parseCommand, validateCommand, modernizeCommand, classifyRisk, classifyStepsRisk, redactSecrets, redactAndLimit, addPathsOf, deriveChecks } = helpers
 
 test('Host 仅把 Shell/Tools 作为必需服务，WebServer 为可选增强', () => {
   assert.deepStrictEqual(plugin.inject, ['shell', 'tools'])
+})
+
+test('Host 组合层只引用 TypeScript 命令策略，不保留重复安全实现', () => {
+  const legacyPath = join(__dirname, '../src/host/legacy-host.cjs')
+  const source = readFileSync(join(__dirname, '../src/host/plugin.ts'), 'utf8')
+  assert.strictEqual(existsSync(legacyPath), false, '旧 CJS Host 源码应已删除')
+  assert.match(source, /from '\.\/command-policy'/)
+  assert.doesNotMatch(source, /@ts-(?:no)?check/)
+  for (const functionName of [
+    'parseCommand', 'validateCommand', 'classifyRisk', 'classifyStepsRisk',
+    'quoteShellArg', 'redactSecrets', 'redactAndLimit', 'addPathsOf', 'deriveChecks',
+  ]) {
+    assert.doesNotMatch(source, new RegExp('function\\s+' + functionName + '\\s*\\('))
+  }
+})
+
+test('Host Action 路由与 Client 生命周期、视图模型保持独立模块边界', () => {
+  const host = readFileSync(join(__dirname, '../src/host/plugin.ts'), 'utf8')
+  const actions = readFileSync(join(__dirname, '../src/host/actions.ts'), 'utf8')
+  const client = readFileSync(join(__dirname, '../src/client/index.ts'), 'utf8')
+  const controller = readFileSync(join(__dirname, '../src/client/panel-controller.ts'), 'utf8')
+  const viewModel = readFileSync(join(__dirname, '../src/client/view-model.ts'), 'utf8')
+
+  assert.match(host, /from '\.\/actions'/)
+  assert.match(host, /registerGitGuideActions\(webServer/)
+  assert.doesNotMatch(host, /function\s+(?:readBody|sendJson|dispatchRepositoryAction|dispatchProposalAction)\s*\(/)
+  assert.match(actions, /export function registerGitGuideActions/)
+
+  assert.match(client, /from '\.\/panel-controller'/)
+  assert.match(client, /from '\.\/view-model'/)
+  assert.doesNotMatch(client, /function\s+createPanelController\s*\(/)
+  assert.doesNotMatch(client, /function\s+(?:buildFileTree|parseReviewRows|deriveCommitGraph)\s*\(/)
+  assert.match(controller, /export function createPanelController/)
+  assert.match(viewModel, /export function buildFileTree/)
+  assert.match(viewModel, /export function parseReviewRows/)
+  assert.match(viewModel, /export function deriveCommitGraph/)
+})
+
+test('Client 与 Host 共用唯一 Action 数据契约', () => {
+  const contracts = readFileSync(join(__dirname, '../src/shared/contracts.ts'), 'utf8')
+  const client = readFileSync(join(__dirname, '../src/client/index.ts'), 'utf8')
+  const repository = readFileSync(join(__dirname, '../src/host/git-repository-service.ts'), 'utf8')
+  const proposals = readFileSync(join(__dirname, '../src/host/proposal-service.ts'), 'utf8')
+
+  assert.match(contracts, /interface GitGuideRequestMap/)
+  assert.match(contracts, /interface GitGuideResponseMap/)
+  assert.match(client, /GitGuideRequest/)
+  assert.match(client, /GitGuideResponse/)
+  assert.match(repository, /from '\.\.\/shared\/contracts'/)
+  assert.match(proposals, /ProposalStatus, ProposalView.*from '\.\.\/shared\/contracts'/)
+  for (const source of [repository, proposals]) {
+    assert.doesNotMatch(source, /export interface (?:RepositorySummary|ProposalView)\b/)
+  }
 })
 
 function callHttp(handler, body, extraHeaders = {}) {
@@ -78,6 +133,15 @@ test('validateCommand 拒绝 Git 二次执行入口、外部子命令与内嵌�
   assert.strictEqual(validateCommand('git remote add origin https://user:token@example.com/repo.git').ok, false)
 })
 
+test('modernizeCommand 将语义明确的 checkout 转换为 switch 或 restore', () => {
+  assert.deepStrictEqual(modernizeCommand('git checkout -b dev'), { command: 'git switch -c dev', changed: true })
+  assert.deepStrictEqual(modernizeCommand('git checkout -B dev main'), { command: 'git switch -C dev main', changed: true })
+  assert.deepStrictEqual(modernizeCommand('git checkout -- "docs/a b.md"'), { command: "git restore -- 'docs/a b.md'", changed: true })
+  assert.deepStrictEqual(modernizeCommand('git checkout -- "~draft"'), { command: "git restore -- '~draft'", changed: true })
+  assert.deepStrictEqual(modernizeCommand('git checkout HEAD~1 -- src/a.ts'), { command: 'git restore --source=HEAD~1 -- src/a.ts', changed: true })
+  assert.deepStrictEqual(modernizeCommand('git checkout dev'), { command: 'git checkout dev', changed: false })
+})
+
 test('classifyRisk 高风险命令', () => {
   assert.strictEqual(classifyRisk('git reset --hard HEAD~1').level, 'hard')
   assert.strictEqual(classifyRisk('git reset --soft HEAD~1').level, 'hard')
@@ -139,7 +203,7 @@ test('deriveChecks 按命令推导预期结果', () => {
   assert.strictEqual(checks[0].value, 'feat/x')
 
   checks = deriveChecks(['git add -f a.txt b.txt', 'git commit -m "fix: hello"'])
-  assert.deepStrictEqual(checks.map((c) => c.type), ['commit-msg']) // 有 commit 时不再检查 staged
+  assert.deepStrictEqual(checks.map((c) => c.type), ['commit-msg']) // A commit supersedes staged-file verification.
 
   checks = deriveChecks(['git add -f a.txt'])
   assert.deepStrictEqual(checks.map((c) => c.type), ['staged'])
@@ -158,33 +222,44 @@ test('deriveChecks 按命令推导预期结果', () => {
   assert.deepStrictEqual(checks.map((c) => c.type), ['no-ahead'])
 })
 
-test('工具路径按会话隔离，并阻止成功提议重放', async () => {
+test('模型工具不暴露执行入口，提议登记成功即结束当前回合', async () => {
   const registered = []
-  let userCommandRuns = 0
   const tools = { register: (definition) => registered.push(definition) }
   const shell = {
     resolve: (request) => ({ ...request, workdir: request.workdir || '/tmp/repo' }),
-    run: async (spec) => {
-      if (spec.command === "'git' 'status'") userCommandRuns++
-      return { exitCode: 0, signal: null, timedOut: false, stdout: { text: spec.command.includes('rev-parse') ? '/tmp/repo\n' : 'ok\n' }, stderr: { text: '' } }
-    },
+    run: async (spec) => ({ exitCode: 0, signal: null, timedOut: false, stdout: { text: spec.command.includes('rev-parse') ? '/tmp/repo\n' : 'ok\n' }, stderr: { text: '' } }),
   }
   const ctx = { get: (key) => key === 'tools' ? tools : key === 'shell' ? shell : null }
   plugin.apply(ctx)
   const byName = (name) => registered.find((definition) => definition.name === name)
   const signal = new AbortController().signal
-  const execA = { agent: { id: 'session-a' }, signal }
-  const execB = { agent: { id: 'session-b' }, signal }
+  let concludeCalls = 0
+  const execA = { agent: { id: 'session-a' }, signal, concludeTurn: () => { concludeCalls += 1 } }
   const proposal = await byName('git_propose').execute({ intent: '查看状态', command: 'git status', explanation: '只读' }, execA)
   assert.strictEqual(proposal.ok, true)
   assert.strictEqual(proposal.risk, 'safe')
-  const crossSession = await byName('git_execute').execute({ proposalId: proposal.proposalId }, execB)
-  assert.strictEqual(crossSession.ok, false)
-  const first = await byName('git_execute').execute({ proposalId: proposal.proposalId }, execA)
-  const replay = await byName('git_execute').execute({ proposalId: proposal.proposalId }, execA)
-  assert.strictEqual(first.ok, true)
-  assert.strictEqual(replay.ok, false)
-  assert.strictEqual(userCommandRuns, 1)
+  assert.strictEqual(concludeCalls, 1)
+  assert.strictEqual(byName('git_execute'), undefined)
+})
+
+test('git_propose 只登记职责明确的现代分支与文件命令', async () => {
+  const registered = []
+  const tools = { register: (definition) => registered.push(definition) }
+  const shell = {
+    resolve: (request) => ({ ...request, workdir: request.workdir || '/tmp/repo' }),
+    run: async () => ({ exitCode: 0, signal: null, timedOut: false, stdout: { text: '/tmp/repo\n' }, stderr: { text: '' } }),
+  }
+  plugin.apply({ get: (key) => key === 'tools' ? tools : key === 'shell' ? shell : null })
+  const propose = registered.find((definition) => definition.name === 'git_propose')
+  const exec = { agent: { id: 'modern-command-session' }, signal: new AbortController().signal }
+  const branch = await propose.execute({ intent: '创建开发分支', command: 'git checkout -b dev', explanation: '创建并切换分支' }, exec)
+  assert.strictEqual(branch.ok, true)
+  assert.strictEqual(branch.command, 'git switch -c dev')
+  assert.strictEqual(branch.risk, 'normal')
+
+  const ambiguous = await propose.execute({ intent: '切换或还原', command: 'git checkout main', explanation: '语义不明确' }, exec)
+  assert.strictEqual(ambiguous.ok, false)
+  assert.match(ambiguous.error, /git switch.*git restore/)
 })
 
 test('HTTP 路由严格按 sessionId 隔离提议', async () => {
@@ -230,28 +305,24 @@ test('HTTP 路由严格按 sessionId 隔离提议', async () => {
   assert.strictEqual(crossSite.status, 403)
 })
 
-test('同一会话执行中不能创建覆盖它的新提议', async () => {
+test('同一会话存在执行中提议时不能创建覆盖它的新提议', async () => {
   const registered = []
-  let release
-  const gate = new Promise((resolve) => { release = resolve })
   const shell = {
     resolve: (request) => ({ ...request, workdir: request.workdir || '/tmp/repo' }),
-    run: async (spec) => {
-      if (spec.command === "'git' 'status'") await gate
-      return { exitCode: 0, signal: null, timedOut: false, stdout: { text: spec.command.includes('rev-parse') ? '/tmp/repo\n' : 'ok\n' }, stderr: { text: '' } }
-    },
+    run: async (spec) => ({ exitCode: 0, signal: null, timedOut: false, stdout: { text: spec.command.includes('rev-parse') ? '/tmp/repo\n' : 'ok\n' }, stderr: { text: '' } }),
   }
   plugin.apply({ get: (key) => key === 'tools' ? { register: (definition) => registered.push(definition) } : key === 'shell' ? shell : null })
   const propose = registered.find((definition) => definition.name === 'git_propose')
-  const execute = registered.find((definition) => definition.name === 'git_execute')
   const exec = { agent: { id: 'running-session' }, signal: new AbortController().signal }
-  const first = await propose.execute({ intent: '状态', command: 'git status', explanation: '读取状态' }, exec)
-  const running = execute.execute({ proposalId: first.proposalId }, exec)
+  helpers.storeProposal('running-session', {
+    proposalId: 'running-proposal', sessionId: 'running-session', intent: '状态', command: 'git status',
+    steps: [{ command: 'git status', result: null }], explanation: '读取状态', risk: 'safe', reasons: [],
+    confirmed: false, workdir: '/tmp/repo', createdAt: Date.now(), result: null, closed: false,
+    copied: false, fingerprint: null, verified: false, status: 'running',
+  })
   const replacement = await propose.execute({ intent: '日志', command: 'git log -1', explanation: '读取日志' }, exec)
   assert.strictEqual(replacement.ok, false)
   assert.match(replacement.error, /正在执行/)
-  release()
-  assert.strictEqual((await running).ok, true)
 })
 
 test('buildRecovery：.gitignore 忽略 → add 加 -f', () => {
@@ -291,4 +362,77 @@ test('registerRecoveryProposal：自动登记为新的 pending 提议（recovery
   assert.strictEqual(created.recovery, true)
   assert.strictEqual(created.command, 'git add -f a.txt')
   assert.strictEqual(helpers.latestPending('recovery-session').proposalId, created.proposalId)
+})
+
+function memoryProposalUnit(records = {}) {
+  const tables = { proposals: records }
+  return {
+    tables,
+    async loadAll() { return structuredClone({ tables, global: null }) },
+    async putRecord(table, key, value) { tables[table][key] = structuredClone(value) },
+    async deleteRecord(table, key) { delete tables[table][key] },
+    async close() {},
+  }
+}
+
+function storedProposal(overrides = {}) {
+  return {
+    proposalId: 'g-12345678-1234-4234-8234-123456789abc',
+    sessionId: 'persisted-session',
+    intent: '查看状态',
+    command: 'git status',
+    steps: [{ command: 'git status', result: null }],
+    explanation: '读取仓库状态',
+    risk: 'safe',
+    reasons: [],
+    confirmed: false,
+    workdir: '/tmp/repo',
+    createdAt: Date.now(),
+    result: null,
+    closed: false,
+    copied: false,
+    fingerprint: null,
+    verified: false,
+    status: 'pending',
+    ...overrides,
+  }
+}
+
+test('提议持久化：Host 重启后恢复同一会话的待处理提议', async () => {
+  const unit = memoryProposalUnit()
+  const first = new helpers.ProposalService()
+  await first.attachStorage(unit)
+  first.store('persisted-session', storedProposal())
+  await first.flush('persisted-session')
+
+  const restarted = new helpers.ProposalService()
+  await restarted.attachStorage(unit)
+  assert.strictEqual(restarted.latestPending('persisted-session').command, 'git status')
+  assert.strictEqual(restarted.latestPending('other-session'), null)
+})
+
+test('提议持久化：已放弃提议不会在 Host 重启后恢复为待处理', async () => {
+  const unit = memoryProposalUnit()
+  const first = new helpers.ProposalService()
+  await first.attachStorage(unit)
+  const proposal = first.store('persisted-session', storedProposal({ status: 'dismissed', closed: true }))
+  assert.strictEqual(proposal.status, 'dismissed')
+  await first.flush('persisted-session')
+
+  const restarted = new helpers.ProposalService()
+  await restarted.attachStorage(unit)
+  assert.strictEqual(restarted.latestPending('persisted-session'), null)
+})
+
+test('提议持久化：执行中重启按失败关闭，防止不确定命令被重放', async () => {
+  const unit = memoryProposalUnit({
+    'persisted-session': { entries: [storedProposal({ status: 'running' })] },
+  })
+  const restarted = new helpers.ProposalService()
+  await restarted.attachStorage(unit)
+  const proposal = restarted.find('persisted-session', 'g-12345678-1234-4234-8234-123456789abc')
+  assert.strictEqual(proposal.status, 'failed')
+  assert.strictEqual(proposal.closed, true)
+  assert.match(proposal.result.error, /无法确认/)
+  assert.strictEqual(restarted.latestPending('persisted-session'), null)
 })
