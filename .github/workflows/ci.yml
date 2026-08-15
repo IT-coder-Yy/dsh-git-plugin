@@ -20,6 +20,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
+      - run: npm ci --include=dev
       - run: npm run lint
       - run: npm test
       - run: npm pack --dry-run --ignore-scripts
