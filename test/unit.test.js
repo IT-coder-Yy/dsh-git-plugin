@@ -39,9 +39,9 @@ test('Host Action 路由与 Client 生命周期、视图模型保持独立模块
   const viewModel = readFileSync(join(__dirname, '../src/client/view-model.ts'), 'utf8')
 
   assert.match(host, /from '\.\/actions'/)
-  assert.match(host, /registerGitGuideActions\(webServer/)
+  assert.match(host, /registerEasyGitActions\(webServer/)
   assert.doesNotMatch(host, /function\s+(?:readBody|sendJson|dispatchRepositoryAction|dispatchProposalAction)\s*\(/)
-  assert.match(actions, /export function registerGitGuideActions/)
+  assert.match(actions, /export function registerEasyGitActions/)
 
   assert.match(client, /from '\.\/panel-controller'/)
   assert.match(client, /from '\.\/view-model'/)
@@ -59,10 +59,10 @@ test('Client 与 Host 共用唯一 Action 数据契约', () => {
   const repository = readFileSync(join(__dirname, '../src/host/git-repository-service.ts'), 'utf8')
   const proposals = readFileSync(join(__dirname, '../src/host/proposal-service.ts'), 'utf8')
 
-  assert.match(contracts, /interface GitGuideRequestMap/)
-  assert.match(contracts, /interface GitGuideResponseMap/)
-  assert.match(client, /GitGuideRequest/)
-  assert.match(client, /GitGuideResponse/)
+  assert.match(contracts, /interface EasyGitRequestMap/)
+  assert.match(contracts, /interface EasyGitResponseMap/)
+  assert.match(client, /EasyGitRequest/)
+  assert.match(client, /EasyGitResponse/)
   assert.match(repository, /from '\.\.\/shared\/contracts'/)
   assert.match(proposals, /ProposalStatus, ProposalView.*from '\.\.\/shared\/contracts'/)
   for (const source of [repository, proposals]) {

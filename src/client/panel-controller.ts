@@ -38,8 +38,8 @@ function errorText(error: unknown): string {
 
 function markWorkbenchOpen(open: boolean): void {
   if (typeof document === 'undefined' || !document.documentElement) return
-  if (open) document.documentElement.setAttribute('data-git-guide-workbench-open', '')
-  else document.documentElement.removeAttribute('data-git-guide-workbench-open')
+  if (open) document.documentElement.setAttribute('data-easygit-workbench-open', '')
+  else document.documentElement.removeAttribute('data-easygit-workbench-open')
 }
 
 /**

@@ -18,7 +18,7 @@ interface ProposalVerification {
     message: string;
     changedState: string;
 }
-interface GitGuideActionDependencies {
+interface EasyGitActionDependencies {
     repository: GitRepositoryService;
     proposalStorageReady: Promise<void>;
     shell: ShellService | null;
@@ -37,5 +37,5 @@ interface GitGuideActionDependencies {
     resolveExecutionPolicy(sessionId: string): unknown;
 }
 /** Register the Client-to-Host POST dispatcher with a 1 MiB body limit. */
-export declare function registerGitGuideActions(webServer: WebServerService | null, dependencies: GitGuideActionDependencies): unknown;
+export declare function registerEasyGitActions(webServer: WebServerService | null, dependencies: EasyGitActionDependencies): unknown;
 export {};

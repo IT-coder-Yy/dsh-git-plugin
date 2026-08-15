@@ -3,7 +3,7 @@
  *
  * The build script wraps this module in Harness's ModuleLoader factory format;
  * source code exports only the Cordis plugin object. Client-to-Host traffic
- * uses same-origin POST /git-guide actions. The workbench is mounted in the
+ * uses same-origin POST /easygit actions. The workbench is mounted in the
  * native details column and controlled from the composer tool row.
  */
 const React = require('react')
@@ -50,9 +50,9 @@ import type {
   CommitDiffResult,
   CommitSummary,
   DiffResult,
-  GitGuideAction,
-  GitGuideRequest,
-  GitGuideResponse,
+  EasyGitAction,
+  EasyGitRequest,
+  EasyGitResponse,
   ProposalExecutionResponse,
   ProposalStateResponse,
   ProposalView,
@@ -111,19 +111,19 @@ interface StashTabProps {
   revision: number
 }
 
-    const RPC_URL = '/git-guide'
+    const RPC_URL = '/easygit'
 
-    function rpc<A extends GitGuideAction>(body: GitGuideRequest<A>, signal?: AbortSignal): Promise<GitGuideResponse<A>> {
+    function rpc<A extends EasyGitAction>(body: EasyGitRequest<A>, signal?: AbortSignal): Promise<EasyGitResponse<A>> {
       return fetch(RPC_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body || {}),
         signal,
-      }).then((r) => r.json() as Promise<GitGuideResponse<A>>)
+      }).then((r) => r.json() as Promise<EasyGitResponse<A>>)
     }
 
     function rpcRepositoryMutation(action: RepositoryMutationAction, sessionId: string, payload: AnyRecord = {}): Promise<ActionResult<RepositorySummary>> {
-      const request = { action, sessionId, operationId: operationId(action), ...payload } as GitGuideRequest<RepositoryMutationAction>
+      const request = { action, sessionId, operationId: operationId(action), ...payload } as EasyGitRequest<RepositoryMutationAction>
       return rpc(request) as Promise<ActionResult<RepositorySummary>>
     }
 
@@ -173,13 +173,13 @@ interface StashTabProps {
         .gg-workbench-action[aria-pressed="true"] { border: 0; background: var(--dsw-alias-button-ghost-active-fill, rgba(127,127,127,.16)); color: var(--dsw-alias-state-business-primary, #3964fe); }
         .gg-workbench-action[aria-pressed="true"]:hover:not(:disabled) { background: var(--dsw-alias-button-ghost-active-hover, rgba(127,127,127,.22)); }
         .gg-workbench-action-dot { width: 6px; height: 6px; border-radius: 50%; background: #e17b00; display: inline-block; }
-        html[data-git-guide-workbench-open] div[data-side='details'][data-side='details'] { display: none !important; pointer-events: none !important; }
+        html[data-easygit-workbench-open] div[data-side='details'][data-side='details'] { display: none !important; pointer-events: none !important; }
         .gg-workbench { position: fixed; z-index: 1; inset: 0 0 0 auto; box-sizing: border-box; width: var(--dsh-easygit-plugin-workbench-width, 36vw); max-width: 100vw; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid rgba(174,180,184,.75); color: #e9ecef; background: #202224; box-shadow: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
         .gg-workbench-resize { position: absolute; z-index: 5; top: 0; bottom: 0; left: -6px; width: 12px; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
         .gg-workbench-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: rgba(127,127,127,.32); transition: background-color .12s ease, box-shadow .12s ease; }
         .gg-workbench-resize:hover::after, .gg-workbench-resize:focus-visible::after, .gg-workbench-resize.dragging::after { background: #00c58b; box-shadow: 0 0 0 1px rgba(0,197,139,.28); }
         .gg-workbench-resize:focus-visible { outline: 2px solid #00c58b; outline-offset: -2px; }
-        html[data-git-guide-workbench-resizing], html[data-git-guide-workbench-resizing] * { cursor: col-resize !important; user-select: none !important; }
+        html[data-easygit-workbench-resizing], html[data-easygit-workbench-resizing] * { cursor: col-resize !important; user-select: none !important; }
         .gg-workbench-head { box-sizing: border-box; display: flex; min-height: 75px; flex: none; align-items: center; gap: 8px; padding: 14px 12px 12px; border-bottom: 1px solid #aeb4b8; }
         .gg-workbench-title { font-size: 14px; line-height: 20px; font-weight: 500; color: #f4f4f4; }
         .gg-workbench-close { display: grid; width: 28px; height: 28px; margin-left: auto; place-items: center; border: 0; border-radius: 999px; padding: 0; background: transparent; color: var(--dsw-alias-label-secondary, inherit); }
@@ -1252,7 +1252,7 @@ interface StashTabProps {
         window.addEventListener('resize', resize)
         return () => {
           window.removeEventListener('resize', resize)
-          document.documentElement.removeAttribute('data-git-guide-workbench-resizing')
+          document.documentElement.removeAttribute('data-easygit-workbench-resizing')
         }
       }, [])
 
@@ -1272,7 +1272,7 @@ interface StashTabProps {
           currentRatio: ratio,
         } as ResizeDrag
         if (event.currentTarget.focus) event.currentTarget.focus()
-        document.documentElement.setAttribute('data-git-guide-workbench-resizing', '')
+        document.documentElement.setAttribute('data-easygit-workbench-resizing', '')
         setIsResizing(true)
         event.preventDefault()
       }
@@ -1289,7 +1289,7 @@ interface StashTabProps {
           const drag = resizeDragRef.current as ResizeDrag | null
           if (!drag || drag.pointerId !== event.pointerId) return
           resizeDragRef.current = null
-          document.documentElement.removeAttribute('data-git-guide-workbench-resizing')
+          document.documentElement.removeAttribute('data-easygit-workbench-resizing')
           setIsResizing(false)
           persistWorkbenchRatio(drag.currentRatio)
         }
@@ -1431,7 +1431,7 @@ interface StashTabProps {
               }
             }
           })
-          .catch((err) => { console.log('git-guide state 调用失败', errorText(err)) })
+          .catch((err) => { console.log('easygit state 调用失败', errorText(err)) })
       }
 
       React.useEffect(() => {
@@ -1629,7 +1629,7 @@ interface StashTabProps {
     const plugin = {
       inject: ['slots', 'timer', 'layout'],
       apply(ctx: AnyRecord) {
-        if (typeof ctx.effect === 'function') ctx.effect(injectStyles, 'git-guide: styles')
+        if (typeof ctx.effect === 'function') ctx.effect(injectStyles, 'easygit: styles')
         else injectStyles()
 
         const slots = ctx.get('slots')

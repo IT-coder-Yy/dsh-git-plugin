@@ -3,13 +3,13 @@
  *
  * It is mounted as one profile composition entry and serves every DeepSeek
  * Harness session. It uses only ctx.tools.register for tools and a
- * ctx.webServer POST /git-guide route for Client-to-Host actions.
+ * ctx.webServer POST /easygit route for Client-to-Host actions.
  *
  * The exposed model tools are git_propose and git_repo_state. Repository changes
  * are only available through the Client action route.
  */
 
-import { registerGitGuideActions, type WebServerService } from './actions'
+import { registerEasyGitActions, type WebServerService } from './actions'
 import {
   ProposalService,
   proposalService,
@@ -466,7 +466,7 @@ function registerRecoveryProposal(failedProposal: Pick<StoredProposal, 'sessionI
   }
   proposalService.closeOpen(sessionId)
   storeProposal(sessionId, proposal)
-  console.log('git-guide 修正建议登记', proposal.proposalId, 'session=', sessionId, 'risk=', risk.level)
+  console.log('easygit 修正建议登记', proposal.proposalId, 'session=', sessionId, 'risk=', risk.level)
   return proposal
 }
 
@@ -499,7 +499,7 @@ function connectProposalStorage(ctx: HostContext): Promise<void> {
     const backend = storage.backend.get('json')
     if (!backend || !backend.kv || typeof backend.kv.open !== 'function') throw new Error('JSON storage backend does not support key-value units')
     unit = await backend.kv.open({
-      name: 'git_guide_proposals',
+      name: 'easygit_proposals',
       version: 1,
       tables: ['proposals'],
       hasGlobal: false,
@@ -513,7 +513,7 @@ function connectProposalStorage(ctx: HostContext): Promise<void> {
 }
 
 const plugin = {
-  name: 'git-guide',
+  name: 'easygit',
   inject: ['shell', 'tools'],
   apply(ctx: HostContext): void {
     const shell = ctx.get<ShellService | null>('shell')
@@ -694,7 +694,7 @@ const plugin = {
       })
     }
 
-    const registerWebServer = (webServer: WebServerService | null): unknown => registerGitGuideActions(webServer, {
+    const registerWebServer = (webServer: WebServerService | null): unknown => registerEasyGitActions(webServer, {
       repository,
       proposalStorageReady,
       shell,

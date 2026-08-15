@@ -1,6 +1,6 @@
 {
   "name": "dsh-easygit-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "面向 DeepSeek Harness Web 的可视化 Git 工作台，支持查看仓库状态与提交记录、快捷执行常用 Git 操作，以及安全运行自然语言生成的分步骤命令提议。",
   "license": "MIT",
   "main": "lib/index.js",
@@ -18,7 +18,7 @@
   },
   "dsh": {
     "bundle": {
-      "patch": "./git-guide.cordis.yml"
+      "patch": "./easygit.cordis.yml"
     },
     "client": {
       "platform": "web",
@@ -51,7 +51,7 @@
     "assets/preview.png",
     "lib/*.js",
     "lib/types/**/*.d.ts",
-    "git-guide.cordis.yml",
+    "easygit.cordis.yml",
     "README.md",
     "README.zh-CN.md",
     "SECURITY.md",

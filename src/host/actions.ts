@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { GitGuideAction, ProposalView } from '../shared/contracts'
+import type { EasyGitAction, ProposalView } from '../shared/contracts'
 import { deriveChecks, redactAndLimit } from './command-policy'
 import type { GitRepositoryService, ShellService } from './git-repository-service'
 import type { StoredProposal } from './proposal-service'
@@ -22,7 +22,7 @@ interface ProposalVerification {
   changedState: string
 }
 
-interface GitGuideActionDependencies {
+interface EasyGitActionDependencies {
   repository: GitRepositoryService
   proposalStorageReady: Promise<void>
   shell: ShellService | null
@@ -54,7 +54,7 @@ const REPOSITORY_ACTIONS = [
   'create-branch',
   'switch-branch',
   'delete-branch',
-] as const satisfies readonly GitGuideAction[]
+] as const satisfies readonly EasyGitAction[]
 
 function isRepositoryAction(action: string): action is typeof REPOSITORY_ACTIONS[number] {
   return (REPOSITORY_ACTIONS as readonly string[]).includes(action)
@@ -102,7 +102,7 @@ async function dispatchRepositoryAction(
   action: typeof REPOSITORY_ACTIONS[number],
   sessionId: string,
   body: UnknownRecord,
-  dependencies: GitGuideActionDependencies,
+  dependencies: EasyGitActionDependencies,
 ): Promise<unknown> {
   const context = dependencies.repositoryContext(sessionId)
   if (!context) return { ok: false, code: 'SESSION_NOT_FOUND', message: '无法确定当前会话的仓库目录' }
@@ -129,7 +129,7 @@ async function dispatchProposalAction(
   action: string,
   sessionId: string,
   body: UnknownRecord,
-  dependencies: GitGuideActionDependencies,
+  dependencies: EasyGitActionDependencies,
 ): Promise<{ status: number; data: unknown }> {
   if (action === 'state') {
     const proposal = dependencies.latestPending(sessionId)
@@ -198,7 +198,7 @@ async function dispatchProposalAction(
       dependencies.resolveExecutionPolicy(sessionId),
       () => dependencies.flushProposal(sessionId),
     )
-    console.log('git-guide HTTP execute', proposal.proposalId, 'ok=', result.ok)
+    console.log('easygit HTTP execute', proposal.proposalId, 'ok=', result.ok)
     return { status: 200, data: result }
   }
 
@@ -206,11 +206,11 @@ async function dispatchProposalAction(
 }
 
 /** Register the Client-to-Host POST dispatcher with a 1 MiB body limit. */
-export function registerGitGuideActions(webServer: WebServerService | null, dependencies: GitGuideActionDependencies): unknown {
+export function registerEasyGitActions(webServer: WebServerService | null, dependencies: EasyGitActionDependencies): unknown {
   if (!webServer) return undefined
   return webServer.register({
     kind: 'prefix',
-    path: '/git-guide',
+    path: '/easygit',
     handler: async (req, res) => {
       if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'method not allowed' }); return }
       if (req.headers?.['sec-fetch-site'] === 'cross-site') { sendJson(res, 403, { ok: false, error: 'cross-site request denied' }); return }

@@ -171,7 +171,7 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
   recovery?: { suggestion: string; command: string; proposalId: string | null } | null
 }
 
-export interface GitGuideRequestMap {
+export interface EasyGitRequestMap {
   'get-summary': { sessionId: string }
   'get-diff': { sessionId: string; path: string; staged: boolean }
   'get-branches': { sessionId: string }
@@ -194,7 +194,7 @@ export interface GitGuideRequestMap {
   execute: { sessionId: string; proposalId: string; confirm?: boolean }
 }
 
-export interface GitGuideResponseMap {
+export interface EasyGitResponseMap {
   'get-summary': ActionResult<RepositorySummary>
   'get-diff': ActionResult<DiffResult>
   'get-branches': ActionResult<RepositoryReferences>
@@ -217,6 +217,6 @@ export interface GitGuideResponseMap {
   execute: ProposalExecutionResponse
 }
 
-export type GitGuideAction = keyof GitGuideRequestMap
-export type GitGuideRequest<A extends GitGuideAction = GitGuideAction> = { action: A } & GitGuideRequestMap[A]
-export type GitGuideResponse<A extends GitGuideAction> = GitGuideResponseMap[A]
+export type EasyGitAction = keyof EasyGitRequestMap
+export type EasyGitRequest<A extends EasyGitAction = EasyGitAction> = { action: A } & EasyGitRequestMap[A]
+export type EasyGitResponse<A extends EasyGitAction> = EasyGitResponseMap[A]

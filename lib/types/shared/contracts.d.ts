@@ -162,7 +162,7 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
         proposalId: string | null;
     } | null;
 }
-export interface GitGuideRequestMap {
+export interface EasyGitRequestMap {
     'get-summary': {
         sessionId: string;
     };
@@ -253,7 +253,7 @@ export interface GitGuideRequestMap {
         confirm?: boolean;
     };
 }
-export interface GitGuideResponseMap {
+export interface EasyGitResponseMap {
     'get-summary': ActionResult<RepositorySummary>;
     'get-diff': ActionResult<DiffResult>;
     'get-branches': ActionResult<RepositoryReferences>;
@@ -275,8 +275,8 @@ export interface GitGuideResponseMap {
     verify: ProposalCommandResponse;
     execute: ProposalExecutionResponse;
 }
-export type GitGuideAction = keyof GitGuideRequestMap;
-export type GitGuideRequest<A extends GitGuideAction = GitGuideAction> = {
+export type EasyGitAction = keyof EasyGitRequestMap;
+export type EasyGitRequest<A extends EasyGitAction = EasyGitAction> = {
     action: A;
-} & GitGuideRequestMap[A];
-export type GitGuideResponse<A extends GitGuideAction> = GitGuideResponseMap[A];
+} & EasyGitRequestMap[A];
+export type EasyGitResponse<A extends EasyGitAction> = EasyGitResponseMap[A];

@@ -3,7 +3,7 @@
  *
  * It is mounted as one profile composition entry and serves every DeepSeek
  * Harness session. It uses only ctx.tools.register for tools and a
- * ctx.webServer POST /git-guide route for Client-to-Host actions.
+ * ctx.webServer POST /easygit route for Client-to-Host actions.
  *
  * The exposed model tools are git_propose and git_repo_state. Repository changes
  * are only available through the Client action route.
