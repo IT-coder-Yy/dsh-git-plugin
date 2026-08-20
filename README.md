@@ -30,9 +30,11 @@ English · [简体中文](README.zh-CN.md)
 1. **Visual repository state**: See the current branch, staged and unstaged files, and each file's formatted review view or raw diff.
 2. **Commit history and details**: Browse the current branch as a commit graph, then click a commit to inspect its message, author, timestamps, parents, changed files, statistics, and full diff.
 3. **One-click Git actions**: Stage or unstage one file or all files, create commits, and create, search, switch, or safely delete local branches directly from the workbench.
-4. **References at a glance**: Inspect local branches, remote branches, and tags without leaving DeepSeek Harness Web.
-5. **Natural-language workflows**: Turn a request into a clear, step-by-step Git command proposal, then execute it directly or copy it for manual execution.
-6. **Safety by default**: Validate commands against a conservative allowlist, require confirmation for high-risk operations, prevent proposal replay, and redact common credentials from diagnostics.
+4. **Remote sync and Rebase**: Inspect upstream, ahead/behind counts, and working-tree state; fetch, fast-forward pull, push, set an upstream for a new branch, or safely start, continue, and abort a Rebase.
+5. **References at a glance**: Inspect local branches, remote branches, and tags without leaving DeepSeek Harness Web.
+6. **Natural-language workflows**: Turn a request into a clear, step-by-step Git command proposal, then execute it directly or copy it for manual execution.
+7. **Actionable failure handling**: Keep the failed command, output, and post-failure repository diagnostics together; offer a safe recovery proposal for recognized failures or let the Agent analyze a complex failure.
+8. **Safety by default**: Validate commands against a conservative allowlist, require confirmation for high-risk operations and history rewrites, prevent proposal replay, and redact common credentials from diagnostics.
 
 ## Quick start
 
@@ -59,7 +61,7 @@ dsh web
 
 ### 3. Open the Git workbench
 
-Use the Git button beside the composer to inspect changes, review commit history, stage files, commit changes, or manage branches with a click.
+Use the Git button beside the composer to inspect changes, review commit history, stage files, commit changes, manage branches, or synchronize with a remote. Rebase and forceful branch deletion require an explicit risk confirmation.
 
 For a more involved workflow, ask the Agent for a Git operation. For example:
 
@@ -106,20 +108,20 @@ The plugin registers two model tools:
 | `git_repo_state` | Reads the current repository state without modifying it. |
 | `git_propose` | Validates and registers one or more Git steps. |
 
-The Web profile adds a Git action beside the composer and opens the workbench in the native details area. Its tabs provide visual access to working-tree changes and diffs, branches and references, commit history and details, stashes, and Agent-generated proposals. Commands are validated both when a proposal is created and immediately before execution.
+The Web profile adds a Git action beside the composer and opens the workbench in the native details area. Its tabs provide visual access to working-tree changes and diffs, branches and references, commit history and details, stashes, remote synchronization, and Agent-generated proposals. Commands are validated both when a proposal is created and immediately before execution. When an action fails, the workbench preserves structured error context and repository diagnostics; recognized failures can create a new recovery proposal, while complex failures can be handed back to the Agent for analysis.
 
 ## Security
 
 - Each step must contain exactly one allowed `git <subcommand> ...` command.
 - Shell control operators, command substitution, redirection, executable hooks, and unsafe Git options are rejected.
-- High-risk operations require explicit confirmation and proposals can only be executed once.
+- High-risk operations, including history rewrites, require explicit confirmation and proposals can only be executed once.
 - The plugin follows the Shell and sandbox policies provided by DeepSeek Harness; use it only with trusted repositories and trusted Git configuration.
 
 Please report vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
 ## Compatibility
 
-Last verified on **2026-08-20** with DeepSeek Harness `0.1.0-rc.8` and dsh-easygit-plugin `0.2.1`. Verification covered the full project check (59 tests), reproducible build artifacts, DSH Web startup, the interactive Git workbench, and a successful response from the plugin's `/easygit` host route.
+Last verified on **2026-08-20** with DeepSeek Harness `0.1.0-rc.8` and dsh-easygit-plugin `0.2.1`. Verification covered `npm run check` (68 tests), 24 reproducible build artifacts, a dry-run npm package, a temporary DSH Web-profile composition, and end-to-end Git operations against a temporary local copy of the FastAPI repository. The end-to-end coverage includes repository inspection, diffs, commits, branches, stashes, fetch/pull/push, successful and conflicted Rebases, recovery behavior, and proposal safety checks.
 
 ## Development
 

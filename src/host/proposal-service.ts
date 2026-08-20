@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ProposalStatus, ProposalView } from '../shared/contracts'
+import type { GitFailureContext, ProposalStatus, ProposalView } from '../shared/contracts'
 export type { ProposalView } from '../shared/contracts'
 import type { RiskLevel } from './command-policy'
 
@@ -26,6 +26,7 @@ export interface StoredProposal {
   fingerprint: string | null
   verified: boolean
   result: Record<string, unknown> | null
+  failure?: GitFailureContext
   [key: string]: unknown
 }
 
@@ -180,6 +181,10 @@ export class ProposalService {
       result: proposal.result,
       closed: proposal.closed,
       copied: proposal.copied,
+      ...(proposal.failure ? { failure: proposal.failure } : {}),
+      ...(typeof proposal.recoverySuggestion === 'string' ? { recoverySuggestion: proposal.recoverySuggestion } : {}),
+      ...(proposal.needsAgentAnalysis === true ? { needsAgentAnalysis: true } : {}),
+      ...(typeof proposal.analysisRequestedAt === 'number' ? { analysisRequestedAt: proposal.analysisRequestedAt } : {}),
       status: proposal.status || (proposal.closed ? 'dismissed' : 'pending'),
     }
   }
@@ -187,6 +192,23 @@ export class ProposalService {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isGitFailureContext(value: unknown): value is GitFailureContext {
+  if (!isRecord(value)) return false
+  return (value.source === 'workbench' || value.source === 'proposal')
+    && typeof value.code === 'string'
+    && typeof value.action === 'string'
+    && typeof value.command === 'string'
+    && typeof value.message === 'string'
+    && typeof value.stdout === 'string'
+    && typeof value.stderr === 'string'
+    && typeof value.diagnostics === 'string'
+    && (value.exitCode === null || (typeof value.exitCode === 'number' && Number.isSafeInteger(value.exitCode)))
+    && typeof value.timedOut === 'boolean'
+    && typeof value.mayHavePartialChanges === 'boolean'
+    && typeof value.occurredAt === 'number'
+    && Number.isSafeInteger(value.occurredAt)
 }
 
 function isStoredProposal(value: unknown, sessionId: string): value is StoredProposal {
@@ -205,6 +227,10 @@ function isStoredProposal(value: unknown, sessionId: string): value is StoredPro
     && typeof value.verified === 'boolean'
     && (value.fingerprint === null || typeof value.fingerprint === 'string')
     && (value.result === null || isRecord(value.result))
+    && (value.failure === undefined || isGitFailureContext(value.failure))
+    && (value.recoverySuggestion === undefined || typeof value.recoverySuggestion === 'string')
+    && (value.needsAgentAnalysis === undefined || typeof value.needsAgentAnalysis === 'boolean')
+    && (value.analysisRequestedAt === undefined || (typeof value.analysisRequestedAt === 'number' && Number.isSafeInteger(value.analysisRequestedAt)))
 }
 
 export const proposalService = new ProposalService()

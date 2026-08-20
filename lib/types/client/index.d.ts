@@ -1,5 +1,5 @@
 import { createPanelController } from './panel-controller';
-import { appendCommandLog, beginTrackedRequest, buildFileTree, cancelTrackedRequest, clampWorkbenchRatio, commitFileTone, deriveCommitGraph, filterLocalBranches, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, parseReviewRows, repositoryName, type AnyRecord } from './view-model';
+import { appendCommandLog, analysisProposalId, beginTrackedRequest, buildAgentRepairPrompt, canDismissFailedProposal, buildFileTree, cancelTrackedRequest, clampWorkbenchRatio, commitFileTone, deriveCommitGraph, filterLocalBranches, failureContext, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, openRecoveryProposal, parseReviewRows, pendingProposalTransition, recoveryProposalId, repositoryName, shouldShowAnalysisBanner, type AnyRecord } from './view-model';
 type RefreshState = 'idle' | 'loading' | 'succeeded' | 'failed';
 declare function injectStyles(): () => void;
 declare function refreshButtonLabel(state: RefreshState): string;
@@ -22,6 +22,14 @@ declare const plugin: {
         mutationCommand: typeof mutationCommand;
         appendCommandLog: typeof appendCommandLog;
         refreshButtonLabel: typeof refreshButtonLabel;
+        recoveryProposalId: typeof recoveryProposalId;
+        openRecoveryProposal: typeof openRecoveryProposal;
+        analysisProposalId: typeof analysisProposalId;
+        failureContext: typeof failureContext;
+        buildAgentRepairPrompt: typeof buildAgentRepairPrompt;
+        shouldShowAnalysisBanner: typeof shouldShowAnalysisBanner;
+        canDismissFailedProposal: typeof canDismissFailedProposal;
+        pendingProposalTransition: typeof pendingProposalTransition;
         isCurrentCommitRequest: typeof isCurrentCommitRequest;
         nextCommitSelection: typeof nextCommitSelection;
         commitFileTone: typeof commitFileTone;

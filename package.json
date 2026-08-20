@@ -1,6 +1,6 @@
 {
   "name": "dsh-easygit-plugin",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "面向 DeepSeek Harness Web 的可视化 Git 工作台，支持查看仓库状态与提交记录、快捷执行常用 Git 操作，以及安全运行自然语言生成的分步骤命令提议。",
   "license": "MIT",
   "main": "lib/index.js",
@@ -24,6 +24,7 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-layout"
       ]

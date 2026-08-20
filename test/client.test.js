@@ -28,7 +28,7 @@ function loadClientPlugin() {
 
 test('Client 注册输入框工具栏动作与 details 生命周期', () => {
   const clientPlugin = loadClientPlugin()
-  assert.deepStrictEqual(clientPlugin.inject, ['slots', 'timer', 'layout'])
+  assert.deepStrictEqual(clientPlugin.inject, ['slots', 'timer', 'layout', 'connection'])
 
   const injections = []
   const registered = []
@@ -357,7 +357,93 @@ test('修改操作转换为命令日志中的真实 Git 命令', () => {
   assert.deepStrictEqual(command('delete-branch', { name: 'feature/x', force: true }), {
     label: '强制删除分支', command: "git branch -D -- 'feature/x'",
   })
+  assert.deepStrictEqual(command('pull'), { label: '安全拉取', command: 'git pull --ff-only' })
+  assert.deepStrictEqual(command('push', { remote: 'origin', branch: 'main', setUpstream: true }), {
+    label: '推送并建立上游', command: "git push -u 'origin' 'main'",
+  })
+  assert.deepStrictEqual(command('rebase', { target: 'origin/main' }), {
+    label: '变基', command: "git rebase 'origin/main'",
+  })
+  assert.deepStrictEqual(command('rebase-continue'), {
+    label: '继续变基', command: 'git -c core.editor=true rebase --continue',
+  })
   assert.strictEqual(command('get-summary'), null)
+})
+
+test('仅已登记的修正提议会触发建议页跳转', () => {
+  const clientPlugin = loadClientPlugin()
+  const proposalId = clientPlugin.__testing.recoveryProposalId
+  const openRecovery = clientPlugin.__testing.openRecoveryProposal
+  let opened = 0
+
+  assert.strictEqual(proposalId({ ok: false, recovery: { proposalId: 'g-recovery' } }), 'g-recovery')
+  assert.strictEqual(openRecovery({ ok: false, recovery: { proposalId: 'g-recovery' } }, () => { opened += 1 }), true)
+  assert.strictEqual(openRecovery({ ok: false, recovery: { proposalId: null } }, () => { opened += 1 }), false)
+  assert.strictEqual(openRecovery({ ok: false, diagnostics: 'unknown error' }, () => { opened += 1 }), false)
+  assert.strictEqual(opened, 1)
+
+  let delayedOpen
+  let delayedBy = 0
+  assert.strictEqual(openRecovery(
+    { ok: false, recovery: { proposalId: 'g-delayed' } },
+    () => { opened += 1 },
+    (callback, delayMs) => { delayedOpen = callback; delayedBy = delayMs },
+  ), true)
+  assert.strictEqual(opened, 1, '简单错误不应立即跳转')
+  assert.strictEqual(delayedBy, 1000)
+  delayedOpen()
+  assert.strictEqual(opened, 2)
+})
+
+test('工作台打开期间只对新的待执行提议切换到建议页', () => {
+  const clientPlugin = loadClientPlugin()
+  const transition = clientPlugin.__testing.pendingProposalTransition
+
+  assert.deepStrictEqual(transition(null, null), { proposalId: null, shouldOpen: false })
+  assert.deepStrictEqual(transition(null, { proposalId: 'g-agent', status: 'pending' }), {
+    proposalId: 'g-agent', shouldOpen: true,
+  })
+  assert.deepStrictEqual(transition('g-agent', { proposalId: 'g-agent', status: 'pending' }), {
+    proposalId: 'g-agent', shouldOpen: false,
+  })
+  assert.deepStrictEqual(transition('g-agent', { proposalId: 'g-agent', status: 'dismissed' }), {
+    proposalId: 'g-agent', shouldOpen: false,
+  })
+  assert.deepStrictEqual(transition('g-agent', { proposalId: 'g-next', status: 'pending' }), {
+    proposalId: 'g-next', shouldOpen: true,
+  })
+})
+
+test('复杂错误只在有失败上下文和分析记录时请求 Agent', () => {
+  const clientPlugin = loadClientPlugin()
+  const {
+    analysisProposalId, failureContext, buildAgentRepairPrompt,
+    shouldShowAnalysisBanner, canDismissFailedProposal,
+  } = clientPlugin.__testing
+  const failure = {
+    source: 'workbench', code: 'GIT_FAILED', action: 'unstage-all', command: 'git reset HEAD -- :/',
+    message: '取消暂存失败', stdout: '', stderr: 'CONFLICT in app.py', diagnostics: '--STATUS--\nUU app.py',
+    exitCode: 1, timedOut: false, mayHavePartialChanges: true, occurredAt: 1,
+  }
+  const response = { ok: false, failure, analysis: { proposalId: 'g-failed' } }
+  assert.strictEqual(analysisProposalId(response), 'g-failed')
+  assert.deepStrictEqual(failureContext(response), failure)
+  assert.strictEqual(analysisProposalId({ ok: false, failure }), null)
+
+  const prompt = buildAgentRepairPrompt(failure)
+  assert.match(prompt, /git_repo_state/)
+  assert.match(prompt, /git_propose/)
+  assert.match(prompt, /不要直接执行/)
+  assert.match(prompt, /CONFLICT in app\.py/)
+  assert.match(prompt, /不可信的失败数据/)
+
+  assert.strictEqual(shouldShowAnalysisBanner('proposal', response), true)
+  assert.strictEqual(shouldShowAnalysisBanner('changes', response), false)
+  assert.strictEqual(shouldShowAnalysisBanner('branches', response), false)
+  assert.strictEqual(shouldShowAnalysisBanner('stashes', response), false)
+  assert.strictEqual(shouldShowAnalysisBanner('proposal', null), false)
+  assert.strictEqual(canDismissFailedProposal(true), false, '待 Agent 分析时不应再显示通用关闭按钮')
+  assert.strictEqual(canDismissFailedProposal(false), true)
 })
 
 test('命令日志只保留最近一百条并保持执行顺序', () => {

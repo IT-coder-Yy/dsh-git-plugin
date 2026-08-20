@@ -18,14 +18,15 @@ interface ProposalVerification {
     message: string;
     changedState: string;
 }
+interface RepositoryContext {
+    workdir: string;
+    policy: unknown;
+}
 interface EasyGitActionDependencies {
     repository: GitRepositoryService;
     proposalStorageReady: Promise<void>;
     shell: ShellService | null;
-    repositoryContext(sessionId: string): {
-        workdir: string;
-        policy: unknown;
-    } | null;
+    repositoryContext(sessionId: string): RepositoryContext | null;
     latestPending(sessionId: string): StoredProposal | null;
     findProposal(sessionId: string, proposalId: unknown): StoredProposal | undefined;
     proposalView(proposal: StoredProposal): ProposalView;
@@ -34,6 +35,7 @@ interface EasyGitActionDependencies {
     runChecks(shell: ShellService | null, workdir: string, checks: ReturnType<typeof deriveChecks>): Promise<string[]>;
     verifyProposal(shell: ShellService | null, proposal: StoredProposal): Promise<ProposalVerification>;
     executeProposal(shell: ShellService | null, proposal: StoredProposal, policy: unknown, persist: () => Promise<void>): Promise<UnknownRecord>;
+    recoverFailedCommand(sessionId: string, workdir: string, operationId: string, action: string, command: string, message: string, errorOutput: string, errorCode: string, reason: string): Promise<UnknownRecord | null>;
     resolveExecutionPolicy(sessionId: string): unknown;
 }
 /** Register the Client-to-Host POST dispatcher with a 1 MiB body limit. */

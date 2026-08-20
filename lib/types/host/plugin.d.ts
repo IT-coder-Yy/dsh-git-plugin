@@ -8,8 +8,9 @@
  * The exposed model tools are git_propose and git_repo_state. Repository changes
  * are only available through the Client action route.
  */
+import type { GitFailureContext } from '../shared/contracts';
 import { ProposalService, type ProposalView, type StoredProposal } from './proposal-service';
-import { type ShellService } from './git-repository-service';
+import { GitRepositoryService, type ShellService } from './git-repository-service';
 import { addPathsOf, classifyRisk, classifyStepsRisk, deriveChecks, modernizeCommand, parseCommand, quoteShellArg, redactAndLimit, redactSecrets, validateCommand, type ExpectedCheck } from './command-policy';
 type UnknownRecord = Record<string, unknown>;
 interface HostContext {
@@ -32,11 +33,15 @@ interface ProposalExecutionResult extends UnknownRecord {
     stdout: string;
     stderr: string;
     diagnostics: string;
+    failure?: GitFailureContext;
     recovery?: {
         suggestion: string;
         command: string;
         proposalId: string | null;
     } | null;
+    analysis?: {
+        proposalId: string;
+    };
     error: string;
 }
 interface ProposalVerification {
@@ -69,8 +74,20 @@ declare function executeRegisteredProposal(shell: ShellService | null | undefine
  * A null command means the condition requires manual remediation.
  */
 declare function buildRecovery(_proposal: StoredProposal, failedStep: StoredProposal['steps'][number] | undefined, diagnostics: string): RecoverySuggestion | null;
+declare function buildRecoveryForCommand(cmd: string, text: string, reason?: string): RecoverySuggestion | null;
+declare function recoverFailedCommand(activeShell: ShellService | null | undefined, sessionId: string, workdir: string, operationId: string, action: string, command: string, message: string, errorOutput: string, errorCode: string, reason: string): Promise<{
+    failure: GitFailureContext;
+    recovery?: {
+        suggestion: string;
+        command: string;
+        proposalId: string | null;
+    };
+    analysis?: {
+        proposalId: string;
+    };
+} | null>;
 /** Register a recovery command as a pending proposal in the same session. */
-declare function registerRecoveryProposal(failedProposal: Pick<StoredProposal, 'sessionId' | 'workdir'>, recovery: RecoverySuggestion): StoredProposal | null;
+declare function registerRecoveryProposal(failedProposal: Pick<StoredProposal, 'sessionId' | 'workdir'>, recovery: RecoverySuggestion, failure?: GitFailureContext): StoredProposal | null;
 declare function storeProposal(sessionId: string, proposal: StoredProposal): StoredProposal;
 declare function findProposal(sessionId: string, proposalId: unknown): StoredProposal | undefined;
 declare function proposalView(proposal: StoredProposal): ProposalView;
@@ -98,12 +115,15 @@ declare const _default: {
         executeProposalSteps: typeof executeProposalSteps;
         executeRegisteredProposal: typeof executeRegisteredProposal;
         buildRecovery: typeof buildRecovery;
+        buildRecoveryForCommand: typeof buildRecoveryForCommand;
+        recoverFailedCommand: typeof recoverFailedCommand;
         registerRecoveryProposal: typeof registerRecoveryProposal;
         storeProposal: typeof storeProposal;
         findProposal: typeof findProposal;
         proposalView: typeof proposalView;
         latestPending: typeof latestPending;
         ProposalService: typeof ProposalService;
+        GitRepositoryService: typeof GitRepositoryService;
     };
 };
 export = _default;

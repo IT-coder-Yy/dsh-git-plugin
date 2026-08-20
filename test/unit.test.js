@@ -337,7 +337,30 @@ test('buildRecovery：分支已存在 → switch -c 改为 switch', () => {
   const failedStep = { command: 'git switch -c feature/x', result: { stderr: 'fatal: a branch named "feature/x" already exists', stdout: '' } }
   const recovery = helpers.buildRecovery({}, failedStep, '')
   assert.ok(recovery)
-  assert.strictEqual(recovery.command, 'git switch feature/x')
+  assert.strictEqual(recovery.command, "git switch 'feature/x'")
+})
+
+test('buildRecoveryForCommand：按钮建分支失败时移除基础分支参数', () => {
+  const recovery = helpers.buildRecoveryForCommand("git switch -c 'feature/x' 'main'", 'fatal: a branch named feature/x already exists')
+  assert.ok(recovery)
+  assert.strictEqual(recovery.command, "git switch 'feature/x'")
+  assert.doesNotMatch(recovery.command, /main/)
+})
+
+test('buildRecoveryForCommand：匹配中文 Git 的“分支已经存在”错误', () => {
+  const recovery = helpers.buildRecoveryForCommand(
+    "git switch -c 'test' 'dev'",
+    "创建分支失败\n致命错误：一个名为 'test' 的分支已经存在",
+  )
+  assert.ok(recovery)
+  assert.strictEqual(recovery.command, "git switch 'test'")
+  assert.match(recovery.suggestion, /test.*已存在/)
+})
+
+test('buildRecoveryForCommand：稳定错误码不依赖 Git 输出语言', () => {
+  const recovery = helpers.buildRecoveryForCommand("git switch -c 'test' 'dev'", '', 'BRANCH_EXISTS')
+  assert.ok(recovery)
+  assert.strictEqual(recovery.command, "git switch 'test'")
 })
 
 test('buildRecovery：只读文件系统 → 给出环境建议、无自动改写命令', () => {
@@ -409,6 +432,33 @@ test('提议持久化：Host 重启后恢复同一会话的待处理提议', asy
   await restarted.attachStorage(unit)
   assert.strictEqual(restarted.latestPending('persisted-session').command, 'git status')
   assert.strictEqual(restarted.latestPending('other-session'), null)
+})
+
+test('提议持久化：完整失败上下文在 Host 重启后保留', async () => {
+  const unit = memoryProposalUnit()
+  const first = new helpers.ProposalService()
+  await first.attachStorage(unit)
+  const failure = {
+    source: 'workbench',
+    code: 'GIT_FAILED',
+    action: 'unstage-all',
+    command: 'git reset HEAD -- :/',
+    message: '取消全部暂存失败',
+    stdout: '',
+    stderr: 'fatal: simulated failure',
+    diagnostics: '--STATUS--\nUU conflict.txt\n--REMOTE--\norigin',
+    exitCode: 128,
+    timedOut: false,
+    mayHavePartialChanges: true,
+    occurredAt: Date.now(),
+  }
+  first.store('persisted-session', storedProposal({ status: 'failed', failure }))
+  await first.flush('persisted-session')
+
+  const restarted = new helpers.ProposalService()
+  await restarted.attachStorage(unit)
+  const restored = restarted.find('persisted-session', 'g-12345678-1234-4234-8234-123456789abc')
+  assert.deepStrictEqual(restarted.view(restored).failure, failure)
 })
 
 test('提议持久化：已放弃提议不会在 Host 重启后恢复为待处理', async () => {

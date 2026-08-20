@@ -12,7 +12,10 @@ import {
   WORKBENCH_DEFAULT_RATIO,
   WORKBENCH_TRACK,
   appendCommandLog,
+  analysisProposalId,
   beginTrackedRequest,
+  buildAgentRepairPrompt,
+  canDismissFailedProposal,
   buildFileTree,
   cancelTrackedRequest,
   clampWorkbenchRatio,
@@ -20,6 +23,7 @@ import {
   deriveCommitGraph,
   diffLineClass,
   filterLocalBranches,
+  failureContext,
   findWorkbenchHostSplit,
   isAbortError,
   isCurrentCommitRequest,
@@ -27,11 +31,15 @@ import {
   isTrackedRequestCurrent,
   mutationCommand,
   nextCommitSelection,
+  openRecoveryProposal,
   parseReviewRows,
+  pendingProposalTransition,
   persistWorkbenchRatio,
   readWorkbenchRatio,
+  recoveryProposalId,
   repositoryName,
   sidebarTrackWidth,
+  shouldShowAnalysisBanner,
   viewportWidth,
   workbenchTrackForRatio,
   type ActiveHostSplit,
@@ -53,6 +61,7 @@ import type {
   EasyGitAction,
   EasyGitRequest,
   EasyGitResponse,
+  GitFailureContext,
   ProposalExecutionResponse,
   ProposalStateResponse,
   ProposalView,
@@ -60,6 +69,7 @@ import type {
   RepositoryFile,
   RepositorySummary,
   StashSummary,
+  SyncState,
 } from '../shared/contracts'
 
 type TimerFn = (callback: () => void, delayMs: number) => Dispose | void
@@ -73,12 +83,14 @@ interface GitWorkbenchActionProps {
 interface GitWorkbenchPanelProps {
   sessionId: string
   close: Dispose
+  connection?: AnyRecord | null
   intervalFn?: TimerFn | null
   timeoutFn?: TimerFn | null
 }
 
 interface GitDockProps {
   sessionId?: unknown
+  onFailure: FailureHandler
   intervalFn?: TimerFn | null
   timeoutFn?: TimerFn | null
 }
@@ -89,6 +101,7 @@ interface RepositoryTabProps {
   revision: number
   onChanged: Dispose
   onCommand: CommandReporter
+  onFailure: FailureHandler
 }
 
 interface BranchTabProps {
@@ -96,9 +109,11 @@ interface BranchTabProps {
   revision: number
   onChanged: Dispose
   onCommand: CommandReporter
+  onFailure: FailureHandler
 }
 
 type CommandReporter = (label: string, command: string) => (succeeded: boolean) => void
+type FailureHandler = (response: AnyRecord) => void
 type RefreshState = 'idle' | 'loading' | 'succeeded' | 'failed'
 
 interface CommitTabProps {
@@ -110,6 +125,8 @@ interface StashTabProps {
   sessionId: string
   revision: number
 }
+
+interface SyncTabProps extends RepositoryTabProps {}
 
     const RPC_URL = '/easygit'
 
@@ -154,7 +171,12 @@ interface StashTabProps {
         .gg-stepnum { flex: none; font-weight: 600; opacity: .6; font-size: 12px; }
         .gg-stepcode { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; background: rgba(127,127,127,.12); border-radius: 4px; padding: 3px 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; user-select: all; }
         .gg-stepres { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
-        .gg-expl { opacity: .9; margin: 8px 0; }
+        .gg-expl { opacity: .9; margin: 8px 0; white-space: pre-wrap; }
+        .gg-failure-card { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; border: 1px solid rgba(255,108,108,.65); border-radius: 6px; padding: 8px; background: rgba(135,22,22,.12); }
+        .gg-failure-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+        .gg-failure-label { color: #ffb0b0; font-size: 11px; font-weight: 600; }
+        .gg-failure-value { margin: 0; overflow-x: auto; color: #f1f3f4; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .gg-analysis { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; border: 1px solid rgba(255,193,7,.62); border-radius: 6px; padding: 8px; background: rgba(139,101,8,.13); }
         .gg-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
         .gg-btn { border: 1px solid rgba(180,180,180,.48); border-radius: 4px; padding: 5px 8px; cursor: pointer; font-size: 12px; background: transparent; color: inherit; }
         .gg-btn:disabled { opacity: .45; cursor: not-allowed; }
@@ -275,6 +297,14 @@ interface StashTabProps {
         .gg-stash-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .gg-stash-date { flex: none; }
         .gg-input { min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid rgba(200,200,200,.55); border-radius: 3px; padding: 6px 8px; background: #181a1b; color: inherit; font-size: 12px; }
+        .gg-sync-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+        .gg-sync-card { display: flex; min-width: 0; flex-direction: column; gap: 4px; border: 1px solid rgba(215,220,222,.45); border-radius: 4px; padding: 7px; background: rgba(127,127,127,.05); }
+        .gg-sync-card strong { color: #51efba; font-size: 11px; }
+        .gg-sync-value { min-width: 0; overflow-wrap: anywhere; color: #e7e9ea; font-size: 12px; }
+        .gg-sync-actions { display: flex; flex-direction: column; gap: 7px; border: 1px solid rgba(215,220,222,.72); border-radius: 3px; padding: 7px; }
+        .gg-sync-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+        .gg-sync-note { color: #9ca5aa; font-size: 11px; line-height: 1.45; }
+        .gg-sync-warning { border: 1px solid rgba(255,193,7,.55); border-radius: 4px; padding: 7px; color: #ffe08a; background: rgba(139,101,8,.13); font-size: 11.5px; }
         .gg-diff { box-sizing: border-box; display: flex; min-width: 0; flex-direction: column; border: 1px solid rgba(215,220,222,.72); border-radius: 3px; padding: 6px; }
         .gg-review-toolbar { display: flex; gap: 5px; align-items: center; margin-bottom: 6px; }
         .gg-review-mode { padding: 3px 6px; font-size: 11px; }
@@ -366,6 +396,47 @@ interface StashTabProps {
       return typeof (response && response.diagnostics) === 'string' ? response.diagnostics : ''
     }
 
+    function failureError(failure: GitFailureContext): string {
+      const message = String(failure.message || '').trim()
+      const stderr = String(failure.stderr || '').trim()
+      if (!stderr || stderr === message) return message || '（无错误输出）'
+      return message ? message + '\n' + stderr : stderr
+    }
+
+    function renderFailureDetails(failure: GitFailureContext, recoveryReason = '') {
+      const details = [
+        '错误码：' + String(failure.code || 'GIT_FAILED'),
+        '退出码：' + (failure.exitCode === null ? '未提供' : String(failure.exitCode)),
+        failure.timedOut ? '命令已超时' : '',
+        failure.mayHavePartialChanges ? '命令可能已部分修改仓库' : '',
+        failure.stdout ? '\n[stdout]\n' + failure.stdout : '',
+        failure.stderr ? '\n[stderr]\n' + failure.stderr : '',
+        failure.diagnostics ? '\n[失败后仓库诊断]\n' + failure.diagnostics : '',
+      ].filter(Boolean).join('\n')
+      return React.createElement('div', { className: 'gg-failure-card' },
+        React.createElement('div', { className: 'gg-failure-row' },
+          React.createElement('strong', { className: 'gg-failure-label' }, '原命令'),
+          React.createElement('code', { className: 'gg-stepcode gg-failure-value' }, String(failure.command || '')),
+        ),
+        React.createElement('div', { className: 'gg-failure-row' },
+          React.createElement('strong', { className: 'gg-failure-label' }, '错误'),
+          React.createElement('pre', { className: 'gg-failure-value' }, failureError(failure)),
+        ),
+        recoveryReason ? React.createElement('div', { className: 'gg-failure-row' },
+          React.createElement('strong', { className: 'gg-failure-label' }, '修正原因'),
+          React.createElement('div', { className: 'gg-failure-value' }, recoveryReason),
+        ) : null,
+        React.createElement('details', null,
+          React.createElement('summary', { className: 'gg-failure-label' }, '完整错误与仓库诊断'),
+          React.createElement('pre', { className: 'gg-pre' }, details),
+        ),
+      )
+    }
+
+    function clientTimeZone(): string | undefined {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined } catch (error) { return undefined }
+    }
+
     function refreshButtonLabel(state: RefreshState): string {
       if (state === 'loading') return '正在刷新…'
       if (state === 'succeeded') return '已刷新'
@@ -428,7 +499,7 @@ interface StashTabProps {
     }
 
     function GitChangesTab(props: RepositoryTabProps) {
-      const { sessionId, intervalFn, revision, onChanged, onCommand } = props
+      const { sessionId, intervalFn, revision, onChanged, onCommand, onFailure } = props
       const [summary, setSummary] = React.useState(null as RepositorySummary | null)
       const [selected, setSelected] = React.useState(null as { path: string; staged: boolean } | null)
       const [diff, setDiff] = React.useState('')
@@ -534,6 +605,7 @@ interface StashTabProps {
               if (completeCommand) completeCommand(false)
               setMessage(actionError(response))
               setDiagnostics(actionDiagnostics(response))
+              onFailure(response as AnyRecord)
               return false
             }
             else {
@@ -652,7 +724,7 @@ interface StashTabProps {
     }
 
     function GitBranchesTab(props: BranchTabProps) {
-      const { sessionId, revision, onChanged, onCommand } = props
+      const { sessionId, revision, onChanged, onCommand, onFailure } = props
       const [branches, setBranches] = React.useState([] as BranchSummary[])
       const [remotes, setRemotes] = React.useState([] as ReferenceSummary[])
       const [tags, setTags] = React.useState([] as ReferenceSummary[])
@@ -723,6 +795,7 @@ interface StashTabProps {
               if (completeCommand) completeCommand(false)
               setMessage(actionError(response))
               setDiagnostics(actionDiagnostics(response))
+              onFailure(response as AnyRecord)
             }
             else { if (completeCommand) completeCommand(true); onChanged(); load() }
           })
@@ -757,6 +830,7 @@ interface StashTabProps {
             completeCommand(false)
             setMessage(actionError(response))
             setDiagnostics(actionDiagnostics(response))
+            onFailure(response as AnyRecord)
             if (!force && response && response.reason === 'UNMERGED_BRANCH') {
               setConfirmDelete(null)
               setForceDelete(branchName)
@@ -1172,6 +1246,195 @@ interface StashTabProps {
       )
     }
 
+    function GitSyncTab(props: SyncTabProps) {
+      const { sessionId, revision, onChanged, onCommand, onFailure } = props
+      const [state, setState] = React.useState(null as SyncState | null)
+      const [targets, setTargets] = React.useState([] as string[])
+      const [remote, setRemote] = React.useState('')
+      const [rebaseTarget, setRebaseTarget] = React.useState('')
+      const [riskAccepted, setRiskAccepted] = React.useState(false)
+      const [busy, setBusy] = React.useState(false)
+      const [message, setMessage] = React.useState('')
+      const [diagnostics, setDiagnostics] = React.useState('')
+      const refreshFeedback = useManualRefreshFeedback()
+      const stateRequestRef = React.useRef({ controller: null, sequence: 0 } as RequestSlot)
+
+      const load = (manual = false): Promise<boolean> => {
+        if (manual) refreshFeedback.begin()
+        const request = beginTrackedRequest(stateRequestRef)
+        return Promise.all([
+          rpc({ action: 'get-sync-state', sessionId }, request.signal),
+          rpc({ action: 'get-branches', sessionId }, request.signal),
+        ]).then(([syncResponse, referenceResponse]) => {
+          if (!isTrackedRequestCurrent(stateRequestRef, request)) return false
+          if (!syncResponse || syncResponse.ok !== true) {
+            setMessage(actionError(syncResponse))
+            setDiagnostics(actionDiagnostics(syncResponse))
+            return false
+          }
+          const nextState = syncResponse.data
+          setState(nextState)
+          setRemote((current: string) => nextState.remotes.includes(current)
+            ? current
+            : nextState.upstream.split('/')[0] || nextState.remotes[0] || '')
+          if (referenceResponse && referenceResponse.ok === true) {
+            const nextTargets = [
+              ...referenceResponse.data.branches.map((entry: BranchSummary) => String(entry.name || '')),
+              ...referenceResponse.data.remotes.map((entry: ReferenceSummary) => String(entry.name || '')),
+            ].filter(Boolean)
+            setTargets(Array.from(new Set(nextTargets)))
+            setRebaseTarget((current: string) => nextTargets.includes(current)
+              ? current
+              : nextState.upstream || nextTargets.find((entry: string) => entry !== nextState.branch) || '')
+          }
+          setMessage('')
+          setDiagnostics('')
+          return true
+        }).catch((error) => {
+          if (!isTrackedRequestCurrent(stateRequestRef, request) || isAbortError(error)) return false
+          setMessage(errorText(error))
+          setDiagnostics('')
+          return false
+        }).then((succeeded) => {
+          if (manual && isTrackedRequestCurrent(stateRequestRef, request)) refreshFeedback.finish(succeeded)
+          return succeeded
+        })
+      }
+
+      React.useEffect(() => {
+        void load()
+        return () => cancelTrackedRequest(stateRequestRef)
+      }, [sessionId, revision])
+
+      const run = (action: 'fetch' | 'pull' | 'push' | 'rebase' | 'rebase-continue' | 'rebase-abort', payload: AnyRecord = {}) => {
+        const description = mutationCommand(action, payload)
+        const completeCommand = description ? onCommand(description.label, description.command) : null
+        setBusy(true)
+        setMessage('')
+        setDiagnostics('')
+        const request = { action, sessionId, operationId: operationId(action), ...payload } as EasyGitRequest<EasyGitAction>
+        return (rpc(request) as Promise<AnyRecord>)
+          .then((response) => {
+            if (!response || response.ok !== true) {
+              if (completeCommand) completeCommand(false)
+              setMessage(actionError(response))
+              setDiagnostics(actionDiagnostics(response))
+              onFailure(response)
+              void load()
+              return false
+            }
+            if (completeCommand) completeCommand(true)
+            setState(response.data as SyncState)
+            setRiskAccepted(false)
+            onChanged()
+            void load()
+            return true
+          })
+          .catch((error) => {
+            if (completeCommand) completeCommand(false)
+            setMessage(errorText(error))
+            setDiagnostics('')
+            return false
+          })
+          .then((succeeded) => { setBusy(false); return succeeded })
+      }
+
+      const hasRemote = !!(state && state.remotes.length)
+      const canUseHistory = !!state && !state.rebaseInProgress && state.conflictCount === 0
+      const pushPayload = state && !state.upstream
+        ? { remote, branch: state.branch, setUpstream: true }
+        : { setUpstream: false }
+      const statusText = !state
+        ? '正在读取同步状态…'
+        : state.rebaseInProgress
+          ? 'Rebase 正在进行'
+          : state.conflictCount > 0
+            ? '存在 ' + state.conflictCount + ' 个冲突文件'
+            : state.dirty ? '工作区有未提交改动' : '工作区干净'
+
+      return React.createElement('section', { className: 'gg-tab-content' },
+        React.createElement('div', { className: 'gg-tab-toolbar' },
+          React.createElement('span', { className: 'gg-idletext' }, state
+            ? repositoryName(state.topLevel) + ' → ' + (state.branch || '分离 HEAD')
+            : '正在读取仓库…'),
+          React.createElement('button', {
+            className: 'gg-btn', type: 'button', disabled: busy || refreshFeedback.state === 'loading', onClick: () => { void load(true) },
+          }, refreshButtonLabel(refreshFeedback.state)),
+        ),
+        message ? React.createElement('div', { className: 'gg-workbench-error' }, message) : null,
+        diagnostics ? React.createElement('pre', { className: 'gg-diagnostics' }, diagnostics) : null,
+        state ? React.createElement('div', { className: 'gg-sync-grid' },
+          React.createElement('div', { className: 'gg-sync-card' }, React.createElement('strong', null, '上游分支'), React.createElement('code', { className: 'gg-sync-value' }, state.upstream || '未设置')),
+          React.createElement('div', { className: 'gg-sync-card' }, React.createElement('strong', null, '提交差异'), React.createElement('span', { className: 'gg-sync-value' }, '领先 ' + state.ahead + ' · 落后 ' + state.behind)),
+          React.createElement('div', { className: 'gg-sync-card' }, React.createElement('strong', null, '工作区'), React.createElement('span', { className: 'gg-sync-value' }, statusText)),
+          React.createElement('div', { className: 'gg-sync-card' }, React.createElement('strong', null, '远程仓库'), React.createElement('span', { className: 'gg-sync-value' }, state.remotes.join('、') || '未配置')),
+        ) : null,
+        !hasRemote && state ? React.createElement('div', { className: 'gg-sync-warning' }, '当前仓库没有远程仓库。请先在终端或后续的 Remote 管理功能中添加远程地址。') : null,
+        React.createElement('div', { className: 'gg-sync-actions' },
+          React.createElement('strong', null, '远程同步'),
+          React.createElement('div', { className: 'gg-sync-row' },
+            React.createElement('select', {
+              className: 'gg-input', value: remote, disabled: busy || !hasRemote,
+              onChange: (event: AnyRecord) => setRemote(String(event.target.value || '')),
+            }, state ? state.remotes.map((entry: string) => React.createElement('option', { value: entry, key: entry }, entry)) : null),
+            React.createElement('button', { className: 'gg-btn', type: 'button', disabled: busy || !remote, onClick: () => { void run('fetch', { remote }) } }, 'Fetch'),
+          ),
+          React.createElement('div', { className: 'gg-actions' },
+            React.createElement('button', {
+              className: 'gg-btn primary', type: 'button',
+              disabled: busy || !state?.upstream || !canUseHistory,
+              title: state && !state.upstream ? '当前分支没有上游跟踪分支' : '仅允许快进，不会创建合并提交或改写历史',
+              onClick: () => { void run('pull') },
+            }, 'Pull（仅快进）'),
+            React.createElement('button', {
+              className: 'gg-btn primary', type: 'button',
+              disabled: busy || !state?.branch || !canUseHistory || (!state?.upstream && !remote),
+              title: state && !state.upstream ? '首次推送会建立上游跟踪' : '推送当前分支到已配置上游',
+              onClick: () => { void run('push', pushPayload) },
+            }, state?.upstream ? 'Push' : 'Push 并设置上游'),
+          ),
+          React.createElement('div', { className: 'gg-sync-note' }, 'Pull 固定执行 git pull --ff-only；若不能快进会停止并保留完整错误，不会自动合并。'),
+        ),
+        React.createElement('div', { className: 'gg-sync-actions' },
+          React.createElement('strong', null, 'Rebase（高风险）'),
+          state?.rebaseInProgress ? React.createElement('div', { className: 'gg-sync-warning' }, state.conflictCount > 0
+            ? '请先在“变更”页解决并暂存全部冲突，然后返回这里继续 Rebase。'
+            : '冲突已经解决并暂存，可以继续 Rebase；也可以中止并恢复到开始前。') : null,
+          !state?.rebaseInProgress ? React.createElement('select', {
+            className: 'gg-input', value: rebaseTarget, disabled: busy || targets.length === 0,
+            onChange: (event: AnyRecord) => setRebaseTarget(String(event.target.value || '')),
+          }, targets.map((entry: string) => React.createElement('option', { value: entry, key: entry }, entry))) : null,
+          React.createElement('label', { className: 'gg-check' },
+            React.createElement('input', {
+              type: 'checkbox', checked: riskAccepted, disabled: busy,
+              onChange: (event: AnyRecord) => setRiskAccepted(event.target.checked === true),
+            }),
+            React.createElement('span', null, state?.rebaseInProgress
+              ? '我了解继续或中止 Rebase 可能改写历史或丢弃本次冲突处理'
+              : '我了解 Rebase 会重写当前分支的本地提交历史'),
+          ),
+          state?.rebaseInProgress ? React.createElement('div', { className: 'gg-actions' },
+            React.createElement('button', {
+              className: 'gg-btn primary', type: 'button', disabled: busy || !riskAccepted || state.conflictCount > 0,
+              onClick: () => { void run('rebase-continue', { confirmRisk: riskAccepted }) },
+            }, '继续 Rebase'),
+            React.createElement('button', {
+              className: 'gg-btn danger', type: 'button', disabled: busy || !riskAccepted,
+              onClick: () => { void run('rebase-abort', { confirmRisk: riskAccepted }) },
+            }, '中止 Rebase'),
+          ) : React.createElement('button', {
+            className: 'gg-btn danger', type: 'button',
+            disabled: busy || !riskAccepted || !rebaseTarget || !!state?.dirty,
+            title: state?.dirty ? '请先提交或贮藏工作区改动' : '将当前分支变基到所选引用',
+            onClick: () => { void run('rebase', { target: rebaseTarget, confirmRisk: riskAccepted }) },
+          }, '开始 Rebase'),
+          React.createElement('div', { className: 'gg-sync-note' }, state?.dirty && !state.rebaseInProgress
+            ? '工作区有改动：为避免丢失内容，开始 Rebase 已禁用。'
+            : 'Rebase 发生冲突时会保留在当前页面；错误详情会交给现有建议与 Agent 分析流程。'),
+        ),
+      )
+    }
+
     function GitWorkbenchPanel(props: GitWorkbenchPanelProps) {
       const [tab, setTab] = React.useState('changes')
       const [revision, setRevision] = React.useState(0)
@@ -1179,12 +1442,84 @@ interface StashTabProps {
       const [currentViewportWidth, setCurrentViewportWidth] = React.useState(viewportWidth)
       const [isResizing, setIsResizing] = React.useState(false)
       const [commandLogs, setCommandLogs] = React.useState([])
+      const [pendingAnalysis, setPendingAnalysis] = React.useState(null as null | {
+        proposalId: string
+        failure: GitFailureContext
+        status: 'ready' | 'requesting' | 'waiting' | 'dismissing'
+        error: string
+      })
       const rootRef = React.useRef(null)
       const hostSplitRef = React.useRef(null)
       const resizeDragRef = React.useRef(null)
       const commandSeqRef = React.useRef(0)
       const commandLogBodyRef = React.useRef(null)
+      const delayedOpenDisposers = React.useRef([])
+      const observedProposalIdRef = React.useRef(null as string | null)
+      const proposalStateRequestRef = React.useRef({ controller: null, sequence: 0 } as RequestSlot)
       const refresh = () => setRevision((current: number) => current + 1)
+      const schedule = (callback: Dispose, delayMs: number): Dispose => {
+        if (props.timeoutFn) {
+          const dispose = props.timeoutFn(callback, delayMs)
+          return typeof dispose === 'function' ? dispose : () => {}
+        }
+        const timer = window.setTimeout(callback, delayMs)
+        return () => window.clearTimeout(timer)
+      }
+      const handleFailure: FailureHandler = (response) => {
+        const scheduled = openRecoveryProposal(response, () => setTab('proposal'), (open, delayMs) => {
+          let dispose: Dispose = () => {}
+          dispose = schedule(() => {
+            delayedOpenDisposers.current = delayedOpenDisposers.current.filter((item: Dispose) => item !== dispose)
+            open()
+          }, delayMs)
+          delayedOpenDisposers.current.push(dispose)
+        })
+        if (scheduled) {
+          setPendingAnalysis(null)
+          return
+        }
+        const proposalId = analysisProposalId(response)
+        const failure = failureContext(response)
+        if (proposalId && failure) setPendingAnalysis({ proposalId, failure, status: 'ready', error: '' })
+      }
+      const requestAnalysis = () => {
+        const current = pendingAnalysis
+        if (!current || current.status !== 'ready') return
+        setPendingAnalysis({ ...current, status: 'requesting', error: '' })
+        rpc({ action: 'request-analysis', sessionId: props.sessionId, proposalId: current.proposalId })
+          .then((response) => {
+            if (!response || response.ok !== true) throw new Error(String(response?.error || '无法标记分析请求'))
+            const sessions = props.connection?.api?.sessions
+            const prompt = sessions?.prompt
+            if (typeof prompt !== 'function') throw new Error('DSH connection 服务不可用，无法请求 Agent 分析')
+            const zone = clientTimeZone()
+            return prompt.call(sessions, {
+              sessionId: props.sessionId,
+              mode: 'queue',
+              content: [{ type: 'text', text: buildAgentRepairPrompt(current.failure) }],
+              ...(zone ? { clientTimeZone: zone } : {}),
+            })
+          })
+          .then(() => setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId
+            ? { ...active, status: 'waiting', error: '' }
+            : active))
+          .catch((error) => setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId
+            ? { ...active, status: 'ready', error: errorText(error) }
+            : active))
+      }
+      const abandonAnalysis = () => {
+        const current = pendingAnalysis
+        if (!current || current.status !== 'ready') return
+        setPendingAnalysis({ ...current, status: 'dismissing', error: '' })
+        rpc({ action: 'dismiss', sessionId: props.sessionId, proposalId: current.proposalId })
+          .then((response) => {
+            if (!response || response.ok !== true) throw new Error(String(response?.error || '无法放弃分析'))
+            setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId ? null : active)
+          })
+          .catch((error) => setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId
+            ? { ...active, status: 'ready', error: errorText(error) }
+            : active))
+      }
       const reportCommand: CommandReporter = (label, command) => {
         commandSeqRef.current += 1
         const id = commandSeqRef.current
@@ -1199,18 +1534,56 @@ interface StashTabProps {
         }
       }
       React.useEffect(() => {
-        const controller = new AbortController()
-        rpc({ action: 'state', sessionId: props.sessionId }, controller.signal)
-          .then((response) => {
-            if (!controller.signal.aborted && response && response.ok === true && response.proposal && response.proposal.status === 'pending') setTab('proposal')
-          })
-          .catch(() => {})
-        return () => controller.abort()
-      }, [props.sessionId])
-      React.useEffect(() => {
         setCommandLogs([])
         commandSeqRef.current = 0
+        setPendingAnalysis(null)
+        observedProposalIdRef.current = null
       }, [props.sessionId])
+      React.useEffect(() => {
+        const check = () => {
+          const request = beginTrackedRequest(proposalStateRequestRef)
+          rpc({ action: 'state', sessionId: props.sessionId }, request.signal)
+            .then((response) => {
+              if (!isTrackedRequestCurrent(proposalStateRequestRef, request)) return
+              const proposal = response && response.ok === true ? response.proposal : null
+              const transition = pendingProposalTransition(observedProposalIdRef.current, proposal)
+              observedProposalIdRef.current = transition.proposalId
+              if (transition.shouldOpen) {
+                setPendingAnalysis(null)
+                setTab('proposal')
+                return
+              }
+              if (proposal && proposal.status === 'failed' && proposal.needsAgentAnalysis && proposal.failure) {
+                setPendingAnalysis((active: AnyRecord | null) => {
+                  if (active && active.proposalId === proposal.proposalId) return active
+                  return {
+                    proposalId: proposal.proposalId,
+                    failure: proposal.failure,
+                    status: proposal.analysisRequestedAt ? 'waiting' : 'ready',
+                    error: '',
+                  }
+                })
+              }
+            })
+            .catch((error) => { if (!isAbortError(error)) { /* 下一轮重试 */ } })
+        }
+        check()
+        if (props.intervalFn) {
+          const dispose = props.intervalFn(check, 1200)
+          return () => {
+            cancelTrackedRequest(proposalStateRequestRef)
+            if (typeof dispose === 'function') dispose()
+          }
+        }
+        const timer = window.setInterval(check, 1200)
+        return () => {
+          cancelTrackedRequest(proposalStateRequestRef)
+          window.clearInterval(timer)
+        }
+      }, [props.intervalFn, props.sessionId])
+      React.useEffect(() => () => {
+        for (const dispose of delayedOpenDisposers.current.splice(0)) dispose()
+      }, [])
       React.useEffect(() => {
         const element = commandLogBodyRef.current as HTMLElement | null
         if (element) element.scrollTop = element.scrollHeight
@@ -1307,17 +1680,36 @@ interface StashTabProps {
         { id: 'branches', label: '分支' },
         { id: 'commits', label: '提交记录' },
         { id: 'stashes', label: '贮藏' },
+        { id: 'sync', label: '同步' },
         { id: 'proposal', label: '建议' },
       ]
       const content = tab === 'changes'
-        ? React.createElement(GitChangesTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand })
+        ? React.createElement(GitChangesTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure })
         : tab === 'branches'
-          ? React.createElement(GitBranchesTab, { sessionId: props.sessionId, revision, onChanged: refresh, onCommand: reportCommand })
+          ? React.createElement(GitBranchesTab, { sessionId: props.sessionId, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure })
           : tab === 'commits'
             ? React.createElement(GitCommitsTab, { sessionId: props.sessionId, revision })
             : tab === 'stashes'
               ? React.createElement(GitStashesTab, { sessionId: props.sessionId, revision })
-              : React.createElement(GitDock, { sessionId: props.sessionId, intervalFn: props.intervalFn, timeoutFn: props.timeoutFn })
+              : tab === 'sync'
+                ? React.createElement(GitSyncTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure })
+                : React.createElement(GitDock, { sessionId: props.sessionId, intervalFn: props.intervalFn, timeoutFn: props.timeoutFn, onFailure: handleFailure })
+      const analysisBanner = shouldShowAnalysisBanner(tab, pendingAnalysis) && pendingAnalysis ? React.createElement('div', { className: 'gg-analysis' },
+        React.createElement('strong', null, pendingAnalysis.status === 'waiting' ? 'Agent 正在分析 Git 失败…' : '这个 Git 失败需要 Agent 分析'),
+        renderFailureDetails(pendingAnalysis.failure),
+        pendingAnalysis.error ? React.createElement('div', { className: 'gg-workbench-error' }, pendingAnalysis.error) : null,
+        React.createElement('div', { className: 'gg-idletext' }, pendingAnalysis.status === 'waiting'
+          ? '已发送给当前会话 Agent；它生成可执行提议后会自动跳转到建议页。'
+          : '确认后，Agent 会读取仓库、文件和远程跟踪状态，仅生成修复提议，不会直接执行。'),
+        pendingAnalysis.status !== 'waiting' ? React.createElement('div', { className: 'gg-actions' },
+          React.createElement('button', {
+            className: 'gg-btn primary', type: 'button', disabled: pendingAnalysis.status !== 'ready', onClick: requestAnalysis,
+          }, pendingAnalysis.status === 'requesting' ? '正在请求…' : '确认并让 Agent 分析'),
+          React.createElement('button', {
+            className: 'gg-btn', type: 'button', disabled: pendingAnalysis.status !== 'ready', onClick: abandonAnalysis,
+          }, pendingAnalysis.status === 'dismissing' ? '正在放弃…' : '放弃分析'),
+        ) : null,
+      ) : null
       return React.createElement('aside', {
         className: 'gg-workbench', 'aria-label': 'Git 工作台', ref: rootRef,
         style: { [WORKBENCH_TRACK]: workbenchTrackForRatio(ratio) },
@@ -1337,6 +1729,7 @@ interface StashTabProps {
             className: 'gg-tab' + (tab === entry.id ? ' active' : ''), type: 'button', role: 'tab',
             'aria-selected': tab === entry.id, onClick: () => setTab(entry.id), key: entry.id,
           }, entry.label))),
+          analysisBanner,
           content,
         ),
         React.createElement('section', { className: 'gg-command-log', 'aria-label': '命令日志' },
@@ -1367,6 +1760,8 @@ interface StashTabProps {
       const currentProposalId = React.useRef(null)
       const scheduledCloses = React.useRef(new Set())
       const closeDisposers = React.useRef([])
+      const recoveryRefreshDisposers = React.useRef([])
+      const deferredRecoveryUntil = React.useRef(0)
 
       const resetProposalState = () => {
         setBusy(false)
@@ -1405,6 +1800,7 @@ interface StashTabProps {
           .then((res) => {
             if (res && res.ok === true) {
               const nextId = res.proposal && res.proposal.proposalId ? res.proposal.proposalId : null
+              if (nextId !== currentProposalId.current && Date.now() < deferredRecoveryUntil.current) return
               if (nextId !== currentProposalId.current) {
                 currentProposalId.current = nextId
                 resetProposalState()
@@ -1448,6 +1844,9 @@ interface StashTabProps {
         for (const dispose of closeDisposers.current.splice(0)) {
           try { dispose() } catch (e) { /* ignore */ }
         }
+        for (const dispose of recoveryRefreshDisposers.current.splice(0)) {
+          try { dispose() } catch (e) { /* ignore */ }
+        }
       }, [])
 
       if (!view) {
@@ -1464,8 +1863,9 @@ interface StashTabProps {
       const isHard = proposal.risk === 'hard'
       const isCopied = proposal.copied === true
       const isPending = !proposal.status || proposal.status === 'pending'
-      const canRun = isPending && !busy && (!isHard || understood)
-      const canCopy = isPending && !busy && (!isHard || understood)
+      const locallyFailed = outcome?.ok === false
+      const canRun = isPending && !locallyFailed && !busy && (!isHard || understood)
+      const canCopy = isPending && !locallyFailed && !busy && (!isHard || understood)
 
       const onRun = () => {
         if (!canRun) return
@@ -1475,6 +1875,26 @@ interface StashTabProps {
           .then((res) => {
             setOutcome(res || { ok: false, error: '无返回' })
             if (res && res.ok === true) scheduleClose(proposal.proposalId)
+            else if (res) {
+              props.onFailure(res as AnyRecord)
+              if (recoveryProposalId(res)) {
+                deferredRecoveryUntil.current = Date.now() + 1000
+                let dispose: Dispose = () => {}
+                const showRecovery = () => {
+                  deferredRecoveryUntil.current = 0
+                  recoveryRefreshDisposers.current = recoveryRefreshDisposers.current.filter((item: Dispose) => item !== dispose)
+                  refresh()
+                }
+                if (timeoutFn) {
+                  const scheduled = timeoutFn(showRecovery, 1000)
+                  if (typeof scheduled === 'function') dispose = scheduled
+                } else {
+                  const timer = window.setTimeout(showRecovery, 1000)
+                  dispose = () => window.clearTimeout(timer)
+                }
+                recoveryRefreshDisposers.current.push(dispose)
+              }
+            }
           })
           .catch((err) => { setOutcome({ ok: false, error: errorText(err) }) })
           .then(() => setBusy(false))
@@ -1534,7 +1954,11 @@ interface StashTabProps {
       const lines = [headerEl]
       if (proposal.intent) lines.push(React.createElement('div', { className: 'gg-intent', key: 'intent' }, String(proposal.intent)))
       lines.push(React.createElement('div', { className: 'gg-steps', key: 'steps' }, renderSteps()))
-      if (proposal.explanation) lines.push(React.createElement('div', { className: 'gg-expl', key: 'expl' }, String(proposal.explanation)))
+      if (proposal.failure) {
+        lines.push(React.createElement('div', { key: 'failure' }, renderFailureDetails(proposal.failure, proposal.recoverySuggestion || '')))
+      } else if (proposal.explanation) {
+        lines.push(React.createElement('div', { className: 'gg-expl', key: 'expl' }, String(proposal.explanation)))
+      }
 
       if (ranInfo) {
         lines.push(React.createElement('div', { className: 'gg-ok gg-ran', key: 'ran' }, '✔ 检测到预期结果已达成（已执行），即将关闭此建议'))
@@ -1566,9 +1990,11 @@ interface StashTabProps {
         lines.push(React.createElement('div', { className: 'gg-intent', key: 'running' }, '命令正在执行，请勿重复提交…'))
       } else if (proposal.status === 'failed') {
         lines.push(React.createElement('div', { className: 'gg-riskline', key: 'failed' }, '该提议已经失败并锁定。请根据诊断创建修正提议，不会自动重放。'))
-        lines.push(React.createElement('div', { className: 'gg-actions', key: 'failed-actions' },
-          React.createElement('button', { className: 'gg-btn', onClick: () => doDismiss(proposal.proposalId) }, '关闭失败提议'),
-        ))
+        if (canDismissFailedProposal(proposal.needsAgentAnalysis)) {
+          lines.push(React.createElement('div', { className: 'gg-actions', key: 'failed-actions' },
+            React.createElement('button', { className: 'gg-btn', onClick: () => doDismiss(proposal.proposalId) }, '关闭失败提议'),
+          ))
+        }
       } else if (isPending) {
         if (isHard) {
           lines.push(React.createElement('div', { className: 'gg-riskline', key: 'risk' }, '⚠ ' + ((proposal.reasons && proposal.reasons.length) ? proposal.reasons.join('；') : '该操作风险较高，可能造成不可逆的改动')))
@@ -1627,7 +2053,7 @@ interface StashTabProps {
     }
 
     const plugin = {
-      inject: ['slots', 'timer', 'layout'],
+      inject: ['slots', 'timer', 'layout', 'connection'],
       apply(ctx: AnyRecord) {
         if (typeof ctx.effect === 'function') ctx.effect(injectStyles, 'easygit: styles')
         else injectStyles()
@@ -1639,12 +2065,14 @@ interface StashTabProps {
         const intervalFn = timer && typeof timer.interval === 'function' ? timer.interval.bind(timer) : null
         const timeoutFn = timer && typeof timer.timeout === 'function' ? timer.timeout.bind(timer) : null
         const layout = ctx.get('layout') || ctx.layout
+        const connection = ctx.get('connection') || ctx.connection || null
         const controller = createPanelController({
           slots,
           layout,
           renderPanel: (panelProps) => React.createElement(GitWorkbenchPanel, {
             sessionId: panelProps.sessionId,
             close: panelProps.close,
+            connection,
             intervalFn,
             timeoutFn,
           }),
@@ -1659,7 +2087,8 @@ interface StashTabProps {
       __testing: {
         createPanelController, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
         clampWorkbenchRatio, deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
-        refreshButtonLabel,
+        refreshButtonLabel, recoveryProposalId, openRecoveryProposal, analysisProposalId, failureContext, buildAgentRepairPrompt,
+        shouldShowAnalysisBanner, canDismissFailedProposal, pendingProposalTransition,
         isCurrentCommitRequest, nextCommitSelection, commitFileTone, isLatestRequest,
         beginTrackedRequest, cancelTrackedRequest, isTrackedRequestCurrent,
       },

@@ -14,6 +14,7 @@ import type {
   RepositoryReferences,
   RepositorySummary,
   StashSummary,
+  SyncState,
 } from '../shared/contracts'
 export type {
   BranchSummary,
@@ -28,6 +29,7 @@ export type {
   RepositoryReferences,
   RepositorySummary,
   StashSummary,
+  SyncState,
 } from '../shared/contracts'
 import { quoteShellArg, redactAndLimit, redactSecrets } from './command-policy'
 
@@ -113,6 +115,23 @@ function validBranchName(name: unknown): name is string {
     && !name.includes('..')
     && !name.includes('@{')
     && !name.endsWith('.lock')
+}
+
+function validRemoteName(name: unknown): name is string {
+  return typeof name === 'string'
+    && name.length > 0
+    && name.length <= 255
+    && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(name)
+    && !name.includes('..')
+    && !name.includes('@{')
+    && !name.endsWith('.lock')
+}
+
+function conflictCount(files: RepositoryFile[]): number {
+  return files.filter((file) => {
+    const status = file.indexStatus + file.workTreeStatus
+    return status.includes('U') || status === 'AA' || status === 'DD'
+  }).length
 }
 
 function validCommitHash(hash: unknown): hash is string {
@@ -396,6 +415,112 @@ export class GitRepositoryService {
     return { ok: true, data: stashes }
   }
 
+  async getSyncState(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<SyncState>> {
+    const summary = await this.getSummary(workdir, signal, sandboxPolicy)
+    if (!summary.ok) return summary
+    const [remoteResult, upstreamResult, rebaseResult] = await Promise.all([
+      this.run(workdir, 'git remote', 15_000, 20_000, signal, sandboxPolicy),
+      this.run(workdir, 'git rev-parse --abbrev-ref --symbolic-full-name @{upstream}', 15_000, 4096, signal, sandboxPolicy),
+      this.run(workdir, 'test -d "$(git rev-parse --git-path rebase-merge)" || test -d "$(git rev-parse --git-path rebase-apply)"', 15_000, 4096, signal, sandboxPolicy),
+    ])
+    if (remoteResult.exitCode !== 0) {
+      return errorResult('GIT_FAILED', '无法读取远程仓库', redactAndLimit(outputOf(remoteResult), 8192))
+    }
+    const remotes = (remoteResult.stdout?.text ?? '').split('\n').map((entry) => redactAndLimit(entry.trim(), 255)).filter(Boolean)
+    const upstream = upstreamResult.exitCode === 0
+      ? redactAndLimit(upstreamResult.stdout?.text ?? '', 512).trim()
+      : ''
+    let ahead = 0
+    let behind = 0
+    if (upstream) {
+      const counts = await this.run(workdir, 'git rev-list --left-right --count HEAD...@{upstream}', 15_000, 4096, signal, sandboxPolicy)
+      if (counts.exitCode !== 0) return errorResult('GIT_FAILED', '无法计算本地与上游的提交差异', redactAndLimit(outputOf(counts), 8192))
+      const [aheadText = '0', behindText = '0'] = (counts.stdout?.text ?? '').trim().split(/\s+/)
+      ahead = /^\d+$/.test(aheadText) ? Number(aheadText) : 0
+      behind = /^\d+$/.test(behindText) ? Number(behindText) : 0
+    }
+    const conflicts = conflictCount(summary.data.files)
+    return {
+      ok: true,
+      data: {
+        topLevel: summary.data.topLevel,
+        branch: summary.data.branch,
+        head: summary.data.head,
+        upstream,
+        remotes,
+        ahead,
+        behind,
+        dirty: summary.data.files.length > 0,
+        conflictCount: conflicts,
+        rebaseInProgress: rebaseResult.exitCode === 0,
+        files: summary.data.files,
+      },
+    }
+  }
+
+  async fetchRemote(request: MutationRequest, remote: unknown): Promise<ActionResult<SyncState>> {
+    if (!validRemoteName(remote)) return errorResult('INVALID_ARGUMENT', '远程仓库名称不合法')
+    const state = await this.getSyncState(request.workdir, request.signal, request.sandboxPolicy)
+    if (!state.ok) return state
+    if (!state.data.remotes.includes(remote)) return errorResult('STATE_CONFLICT', '远程仓库不存在', undefined, 'NO_REMOTE')
+    return this.mutateSync(request, 'git fetch ' + quoteShellArg(remote), '获取远程更新失败')
+  }
+
+  async pullFfOnly(request: MutationRequest): Promise<ActionResult<SyncState>> {
+    const state = await this.getSyncState(request.workdir, request.signal, request.sandboxPolicy)
+    if (!state.ok) return state
+    if (!state.data.branch) return errorResult('STATE_CONFLICT', '分离 HEAD 状态不能直接拉取', undefined, 'DETACHED_HEAD')
+    if (!state.data.upstream) return errorResult('STATE_CONFLICT', '当前分支没有上游跟踪分支', undefined, 'NO_UPSTREAM')
+    if (state.data.rebaseInProgress) return errorResult('STATE_CONFLICT', 'Rebase 进行中，请先继续或中止', undefined, 'REBASE_IN_PROGRESS')
+    if (state.data.conflictCount > 0) return errorResult('STATE_CONFLICT', '存在尚未解决的冲突', undefined, 'CONFLICTS_PRESENT')
+    return this.mutateSync(request, 'git pull --ff-only', '拉取远程更新失败')
+  }
+
+  async pushCurrent(request: MutationRequest, remote: unknown, branch: unknown, setUpstream: boolean): Promise<ActionResult<SyncState>> {
+    const state = await this.getSyncState(request.workdir, request.signal, request.sandboxPolicy)
+    if (!state.ok) return state
+    if (!state.data.branch) return errorResult('STATE_CONFLICT', '分离 HEAD 状态不能直接推送', undefined, 'DETACHED_HEAD')
+    if (state.data.rebaseInProgress) return errorResult('STATE_CONFLICT', 'Rebase 进行中，请先继续或中止', undefined, 'REBASE_IN_PROGRESS')
+    if (setUpstream) {
+      if (state.data.upstream) return errorResult('STATE_CONFLICT', '当前分支已经有上游，请使用普通推送')
+      if (!validRemoteName(remote) || !state.data.remotes.includes(remote)) return errorResult('STATE_CONFLICT', '请选择存在的远程仓库', undefined, 'NO_REMOTE')
+      if (!validBranchName(branch) || branch !== state.data.branch) return errorResult('INVALID_ARGUMENT', '只能为当前本地分支建立上游')
+      return this.mutateSync(request, 'git push -u ' + quoteShellArg(remote) + ' ' + quoteShellArg(branch), '推送并建立上游失败')
+    }
+    if (!state.data.upstream) return errorResult('STATE_CONFLICT', '当前分支没有上游跟踪分支', undefined, 'NO_UPSTREAM')
+    return this.mutateSync(request, 'git push', '推送失败')
+  }
+
+  async rebaseOnto(request: MutationRequest, target: unknown, confirmRisk: boolean): Promise<ActionResult<SyncState>> {
+    if (!validBranchName(target)) return errorResult('INVALID_ARGUMENT', 'Rebase 目标必须是安全的本地或远程分支引用')
+    if (!confirmRisk) return errorResult('PERMISSION_DENIED', 'Rebase 会重写本地提交历史，执行前必须确认风险')
+    const state = await this.getSyncState(request.workdir, request.signal, request.sandboxPolicy)
+    if (!state.ok) return state
+    if (!state.data.branch) return errorResult('STATE_CONFLICT', '分离 HEAD 状态不能开始 Rebase', undefined, 'DETACHED_HEAD')
+    if (state.data.rebaseInProgress) return errorResult('STATE_CONFLICT', '已有 Rebase 正在进行', undefined, 'REBASE_IN_PROGRESS')
+    if (state.data.dirty) return errorResult('STATE_CONFLICT', 'Rebase 前需要提交或贮藏工作区改动', undefined, 'DIRTY_WORKTREE')
+    const exists = await this.run(request.workdir, 'git rev-parse --verify --quiet ' + quoteShellArg(target + '^{commit}'), 15_000, 4096, request.signal, request.sandboxPolicy)
+    if (exists.exitCode !== 0) return errorResult('STATE_CONFLICT', 'Rebase 目标引用不存在', undefined, 'REF_NOT_FOUND')
+    return this.mutateSync(request, 'git rebase ' + quoteShellArg(target), 'Rebase 失败')
+  }
+
+  async continueRebase(request: MutationRequest, confirmRisk: boolean): Promise<ActionResult<SyncState>> {
+    if (!confirmRisk) return errorResult('PERMISSION_DENIED', '继续 Rebase 前必须确认历史重写风险')
+    const state = await this.getSyncState(request.workdir, request.signal, request.sandboxPolicy)
+    if (!state.ok) return state
+    if (!state.data.rebaseInProgress) return errorResult('STATE_CONFLICT', '当前没有正在进行的 Rebase', undefined, 'NO_REBASE_IN_PROGRESS')
+    if (state.data.conflictCount > 0) return errorResult('STATE_CONFLICT', '仍有冲突文件，请解决并暂存后再继续', undefined, 'CONFLICTS_PRESENT')
+    return this.mutateSync(request, 'git -c core.editor=true rebase --continue', '继续 Rebase 失败')
+  }
+
+  async abortRebase(request: MutationRequest, confirmRisk: boolean): Promise<ActionResult<SyncState>> {
+    if (!confirmRisk) return errorResult('PERMISSION_DENIED', '中止 Rebase 会丢弃本次变基过程中的修改，执行前必须确认风险')
+    const state = await this.getSyncState(request.workdir, request.signal, request.sandboxPolicy)
+    if (!state.ok) return state
+    if (!state.data.rebaseInProgress) return errorResult('STATE_CONFLICT', '当前没有正在进行的 Rebase', undefined, 'NO_REBASE_IN_PROGRESS')
+    return this.mutateSync(request, 'git rebase --abort', '中止 Rebase 失败')
+  }
+
   async stagePaths(request: MutationRequest, paths: unknown): Promise<ActionResult<RepositorySummary>> {
     const valid = this.validatePaths(paths)
     if (!valid.ok) return valid
@@ -425,6 +550,18 @@ export class GitRepositoryService {
 
   async createBranch(request: MutationRequest, name: unknown, base: unknown): Promise<ActionResult<RepositorySummary>> {
     if (!validBranchName(name) || !validBranchName(base)) return errorResult('INVALID_ARGUMENT', '分支名和基础分支必须是安全的本地 Git 引用')
+    const repository = await this.getTopLevel(request.workdir, request.signal, request.sandboxPolicy)
+    if (!repository.ok) return repository
+    const exists = await this.run(
+      request.workdir,
+      'git show-ref --verify --quiet ' + quoteShellArg('refs/heads/' + name),
+      15_000,
+      4096,
+      request.signal,
+      request.sandboxPolicy,
+    )
+    if (exists.exitCode === 0) return errorResult('STATE_CONFLICT', '同名本地分支已经存在', undefined, 'BRANCH_EXISTS')
+    if (exists.exitCode !== 1) return errorResult('GIT_FAILED', '无法检查目标分支是否存在', redactAndLimit(outputOf(exists), 8192))
     return this.mutate(request, 'git switch -c ' + quoteShellArg(name) + ' ' + quoteShellArg(base), false, '创建分支失败')
   }
 
@@ -465,7 +602,21 @@ export class GitRepositoryService {
     return { ok: true, data: paths }
   }
 
-  private async mutate(request: MutationRequest, command: string, requiresStagedContent = false, failureMessage = 'Git 操作失败'): Promise<ActionResult<RepositorySummary>> {
+  private mutate(request: MutationRequest, command: string, requiresStagedContent = false, failureMessage = 'Git 操作失败'): Promise<ActionResult<RepositorySummary>> {
+    return this.mutateAndRead(request, command, failureMessage, requiresStagedContent, () => this.getSummary(request.workdir, request.signal, request.sandboxPolicy))
+  }
+
+  private mutateSync(request: MutationRequest, command: string, failureMessage: string): Promise<ActionResult<SyncState>> {
+    return this.mutateAndRead(request, command, failureMessage, false, () => this.getSyncState(request.workdir, request.signal, request.sandboxPolicy))
+  }
+
+  private async mutateAndRead<T>(
+    request: MutationRequest,
+    command: string,
+    failureMessage: string,
+    requiresStagedContent: boolean,
+    readResult: () => Promise<ActionResult<T>>,
+  ): Promise<ActionResult<T>> {
     if (!request.sessionId || !request.workdir) return errorResult('SESSION_NOT_FOUND', '无法确定当前会话的仓库目录')
     if (typeof request.operationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(request.operationId)) {
       return errorResult('INVALID_ARGUMENT', 'operationId 必须是 1–128 个安全字符')
@@ -475,7 +626,7 @@ export class GitRepositoryService {
     if (!repository.ok) return repository
     const key = request.sessionId + '\u0000' + repository.data.topLevel + '\u0000' + request.operationId
     const existing = this.operations.get(key)
-    if (existing) return existing.result as Promise<ActionResult<RepositorySummary>>
+    if (existing) return existing.result as Promise<ActionResult<T>>
 
     const lockKey = request.sessionId + '\u0000' + repository.data.topLevel
     const previous = this.locks.get(lockKey) ?? Promise.resolve()
@@ -487,13 +638,13 @@ export class GitRepositoryService {
       try {
         if (requiresStagedContent) {
           const staged = await this.run(request.workdir, 'git diff --cached --quiet', 15_000, 4096, request.signal, request.sandboxPolicy)
-          if (staged.exitCode === 0) return errorResult<RepositorySummary>('STATE_CONFLICT', '没有已暂存的改动，无法提交')
-          if (staged.exitCode !== 1) return errorResult<RepositorySummary>('GIT_FAILED', '无法检查暂存区', redactAndLimit(outputOf(staged), 8192))
+          if (staged.exitCode === 0) return errorResult<T>('STATE_CONFLICT', '没有已暂存的改动，无法提交')
+          if (staged.exitCode !== 1) return errorResult<T>('GIT_FAILED', '无法检查暂存区', redactAndLimit(outputOf(staged), 8192))
         }
         const executed = await this.run(request.workdir, command, 120_000, MUTATION_OUTPUT_MAX_CHARS, request.signal, request.sandboxPolicy)
-        if (executed.exitCode !== 0) return errorResult<RepositorySummary>(mutationErrorCode(executed), failureMessage, redactAndLimit(outputOf(executed), 8192))
-        const summary = await this.getSummary(request.workdir, request.signal, request.sandboxPolicy)
-        return summary.ok ? { ...summary, operationId: String(request.operationId) } : summary
+        if (executed.exitCode !== 0) return errorResult<T>(mutationErrorCode(executed), failureMessage, redactAndLimit(outputOf(executed), 8192))
+        const result = await readResult()
+        return result.ok ? { ...result, operationId: String(request.operationId) } : result
       } finally {
         release()
         if (this.locks.get(lockKey) === queued) this.locks.delete(lockKey)

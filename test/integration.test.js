@@ -9,6 +9,7 @@ const assert = require('node:assert')
 const { execFileSync } = require('node:child_process')
 const { EventEmitter } = require('node:events')
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const plugin = require('../lib')
 const { helpers } = plugin
@@ -81,6 +82,86 @@ test('建分支：switch -c 后 branch 校验通过，且仓库指纹发生变�
     const failed = await runChecks(shell, dir, checks)
     assert.deepStrictEqual(failed, [], '当前分支应为 feat/x')
   } finally { cleanup(dir) }
+})
+
+test('同步工作台：Fetch、仅快进 Pull、Push 设置上游及 Rebase 中止使用真实仓库', async () => {
+  const dir = createRepo()
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-remote-'))
+  const peer = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-peer-'))
+  try {
+    execFileSync('git', ['init', '-q', '--bare', '--initial-branch=main'], { cwd: bare })
+    execFileSync('git', ['remote', 'add', 'origin', bare], { cwd: dir })
+    execFileSync('git', ['push', '-q', '-u', 'origin', 'main'], { cwd: dir })
+    const repository = new helpers.GitRepositoryService(makeShell(dir))
+    const request = (operationId) => ({ sessionId: 'sync-session', workdir: dir, operationId })
+
+    let state = await repository.getSyncState(dir)
+    assert.strictEqual(state.ok, true)
+    assert.strictEqual(state.data.branch, 'main')
+    assert.strictEqual(state.data.upstream, 'origin/main')
+    assert.deepStrictEqual(state.data.remotes, ['origin'])
+    assert.strictEqual(state.data.ahead, 0)
+    assert.strictEqual(state.data.behind, 0)
+
+    execFileSync('git', ['clone', '-q', bare, peer])
+    execFileSync('git', ['config', 'user.name', 'peer'], { cwd: peer })
+    execFileSync('git', ['config', 'user.email', 'peer@example.com'], { cwd: peer })
+    fs.writeFileSync(path.join(peer, 'remote.txt'), 'remote\n')
+    execFileSync('git', ['add', 'remote.txt'], { cwd: peer })
+    execFileSync('git', ['commit', '-q', '-m', 'remote update'], { cwd: peer })
+    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: peer })
+
+    const fetched = await repository.fetchRemote(request('fetch-origin'), 'origin')
+    assert.strictEqual(fetched.ok, true, JSON.stringify(fetched))
+    assert.strictEqual(fetched.data.behind, 1)
+    const pulled = await repository.pullFfOnly(request('pull-ff-only'))
+    assert.strictEqual(pulled.ok, true, JSON.stringify(pulled))
+    assert.strictEqual(pulled.data.behind, 0)
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'remote.txt'), 'utf8'), 'remote\n')
+
+    execFileSync('git', ['switch', '-q', '-c', 'feature/sync'], { cwd: dir })
+    fs.writeFileSync(path.join(dir, 'feature.txt'), 'feature\n')
+    execFileSync('git', ['add', 'feature.txt'], { cwd: dir })
+    execFileSync('git', ['commit', '-q', '-m', 'feature update'], { cwd: dir })
+    const pushed = await repository.pushCurrent(request('push-feature'), 'origin', 'feature/sync', true)
+    assert.strictEqual(pushed.ok, true, JSON.stringify(pushed))
+    assert.strictEqual(pushed.data.upstream, 'origin/feature/sync')
+
+    execFileSync('git', ['switch', '-q', 'main'], { cwd: dir })
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'main change\n')
+    execFileSync('git', ['add', 'a.txt'], { cwd: dir })
+    execFileSync('git', ['commit', '-q', '-m', 'main conflict'], { cwd: dir })
+    execFileSync('git', ['switch', '-q', '-c', 'feature/conflict', 'HEAD~1'], { cwd: dir })
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'feature change\n')
+    execFileSync('git', ['add', 'a.txt'], { cwd: dir })
+    execFileSync('git', ['commit', '-q', '-m', 'feature conflict'], { cwd: dir })
+
+    const withoutConfirmation = await repository.rebaseOnto(request('rebase-without-confirm'), 'main', false)
+    assert.strictEqual(withoutConfirmation.ok, false)
+    assert.strictEqual(withoutConfirmation.code, 'PERMISSION_DENIED')
+    const conflicted = await repository.rebaseOnto(request('rebase-conflict'), 'main', true)
+    assert.strictEqual(conflicted.ok, false)
+    assert.strictEqual(conflicted.code, 'GIT_FAILED')
+    state = await repository.getSyncState(dir)
+    assert.strictEqual(state.ok, true)
+    assert.strictEqual(state.data.rebaseInProgress, true)
+    assert.ok(state.data.conflictCount > 0)
+    const aborted = await repository.abortRebase(request('rebase-abort'), true)
+    assert.strictEqual(aborted.ok, true, JSON.stringify(aborted))
+    assert.strictEqual(aborted.data.rebaseInProgress, false)
+
+    const conflictedAgain = await repository.rebaseOnto(request('rebase-conflict-again'), 'main', true)
+    assert.strictEqual(conflictedAgain.ok, false)
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'resolved change\n')
+    execFileSync('git', ['add', 'a.txt'], { cwd: dir })
+    const continued = await repository.continueRebase(request('rebase-continue'), true)
+    assert.strictEqual(continued.ok, true, JSON.stringify(continued))
+    assert.strictEqual(continued.data.rebaseInProgress, false)
+  } finally {
+    cleanup(dir)
+    cleanup(peer)
+    cleanup(bare)
+  }
 })
 
 test('暂存校验：git add 后 staged 检查通过', async () => {
@@ -226,6 +307,27 @@ test('执行失败自动生成并登记修正提议（.gitignore 忽略 → add 
   } finally { cleanup(dir) }
 })
 
+test('提议命令的复杂失败保留在建议页并等待 Agent 确认', async () => {
+  const dir = createRepo()
+  try {
+    const shell = makeShell(dir)
+    const proposal = {
+      proposalId: 'p-complex', sessionId: 'complex-proposal-session', workdir: dir,
+      command: 'git reset --soft HEAD~99',
+      steps: [{ command: 'git reset --soft HEAD~99', result: null }],
+      risk: 'normal', reasons: [], confirmed: false,
+      status: 'pending', closed: false,
+    }
+    const result = await executeRegisteredProposal(shell, proposal)
+    assert.strictEqual(result.ok, false)
+    assert.strictEqual(result.recovery, null)
+    assert.strictEqual(result.analysis.proposalId, 'p-complex')
+    assert.strictEqual(proposal.needsAgentAnalysis, true)
+    assert.strictEqual(proposal.failure.command, 'git reset --soft HEAD~99')
+    assert.match(proposal.failure.stderr, /HEAD~99|unknown revision|ambiguous argument/i)
+  } finally { cleanup(dir) }
+})
+
 test('结构化仓库 Action 受会话工作目录约束，并对 operationId 去重', async () => {
   const dir = createRepo()
   try {
@@ -235,12 +337,16 @@ test('结构化仓库 Action 受会话工作目录约束，并对 operationId �
     const registered = []
     let route
     let addRuns = 0
+    let agentLookups = 0
     let forceUnstageFailure = false
     const baseShell = makeShell(dir)
     const shell = {
       resolve: baseShell.resolve,
       run: async (spec) => {
         if (spec.command === "git add -- 'work.txt'") addRuns += 1
+        if (spec.command === "git switch -c 'localized-existing' 'main'") {
+          return { exitCode: 128, stderr: { text: "致命错误：一个名为 'localized-existing' 的分支已经存在" }, stdout: { text: '' } }
+        }
         if (forceUnstageFailure && spec.command === 'git reset HEAD -- :/') {
           return { exitCode: 1, stderr: { text: 'fatal: simulated unstage failure' }, stdout: { text: '' } }
         }
@@ -252,7 +358,7 @@ test('结构化仓库 Action 受会话工作目录约束，并对 operationId �
       get: (key) => {
         if (key === 'shell') return shell
         if (key === 'tools') return { register: (definition) => registered.push(definition) }
-        if (key === 'agents') return { get: (id) => id === 'workbench-session' ? { session } : undefined }
+        if (key === 'agents') return { get: (id) => { agentLookups += 1; return id === 'workbench-session' ? { session } : undefined } }
         return null
       },
       inject: (_deps, callback) => callback({ get: () => ({ register: (definition) => { route = definition } }) }),
@@ -273,6 +379,41 @@ test('结构化仓库 Action 受会话工作目录约束，并对 operationId �
     assert.ok(references.body.data.branches.some((branch) => branch.name === 'main' && branch.current))
     assert.ok(references.body.data.remotes.some((remote) => remote.name === 'origin/main'))
     assert.ok(references.body.data.tags.some((tag) => tag.name === 'v1.0.0' && tag.hash))
+
+    const lookupsBeforeFailure = agentLookups
+    const existingBranch = await callHttp(route.handler, {
+      action: 'create-branch', sessionId: 'workbench-session', operationId: 'create-existing-main', name: 'main', base: 'main',
+    })
+    assert.strictEqual(agentLookups, lookupsBeforeFailure + 1, '同一请求的执行与修正提议必须复用同一份会话上下文')
+    assert.strictEqual(existingBranch.body.ok, false)
+    assert.strictEqual(existingBranch.body.code, 'STATE_CONFLICT')
+    assert.strictEqual(existingBranch.body.reason, 'BRANCH_EXISTS')
+    assert.strictEqual(existingBranch.body.failure.command, "git switch -c 'main' 'main'")
+    assert.strictEqual(existingBranch.body.failure.code, 'STATE_CONFLICT')
+    assert.strictEqual(existingBranch.body.failure.message, '同名本地分支已经存在')
+    assert.strictEqual(existingBranch.body.failure.mayHavePartialChanges, false)
+    assert.ok(existingBranch.body.recovery, '按钮命令失败后应返回已登记的修正提议')
+    assert.strictEqual(existingBranch.body.recovery.command, "git switch 'main'")
+    assert.match(existingBranch.body.recovery.suggestion, /已存在/)
+    assert.ok(existingBranch.body.recovery.proposalId)
+    const buttonRecovery = latestPending('workbench-session')
+    assert.ok(buttonRecovery, '修正提议应出现在同一会话的建议页数据源中')
+    assert.strictEqual(buttonRecovery.proposalId, existingBranch.body.recovery.proposalId)
+    assert.strictEqual(buttonRecovery.command, "git switch 'main'")
+    assert.strictEqual(buttonRecovery.status, 'pending')
+    assert.strictEqual(buttonRecovery.recovery, true)
+    const repeatedExistingBranch = await callHttp(route.handler, {
+      action: 'create-branch', sessionId: 'workbench-session', operationId: 'create-existing-main', name: 'main', base: 'main',
+    })
+    assert.strictEqual(repeatedExistingBranch.body.recovery.proposalId, existingBranch.body.recovery.proposalId, '相同 operationId 不得重复登记修正提议')
+    assert.strictEqual(latestPending('workbench-session').proposalId, existingBranch.body.recovery.proposalId)
+
+    const localizedExistingBranch = await callHttp(route.handler, {
+      action: 'create-branch', sessionId: 'workbench-session', operationId: 'create-localized-existing', name: 'localized-existing', base: 'main',
+    })
+    assert.strictEqual(localizedExistingBranch.body.ok, false)
+    assert.strictEqual(localizedExistingBranch.body.recovery.command, "git switch 'localized-existing'")
+    assert.strictEqual(latestPending('workbench-session').proposalId, localizedExistingBranch.body.recovery.proposalId)
 
     const untrackedDiff = await callHttp(route.handler, { action: 'get-diff', sessionId: 'workbench-session', path: 'work.txt', staged: false })
     assert.strictEqual(untrackedDiff.body.ok, true)
@@ -400,12 +541,38 @@ test('结构化仓库 Action 受会话工作目录约束，并对 operationId �
 
     forceUnstageFailure = true
     const failedUnstage = await callHttp(route.handler, { action: 'unstage-all', sessionId: 'workbench-session', operationId: 'failed-unstage-all' })
-    assert.deepStrictEqual(failedUnstage.body, {
-      ok: false,
-      code: 'GIT_FAILED',
-      message: '取消全部暂存失败',
-      diagnostics: 'fatal: simulated unstage failure',
+    assert.strictEqual(failedUnstage.body.ok, false)
+    assert.strictEqual(failedUnstage.body.code, 'GIT_FAILED')
+    assert.strictEqual(failedUnstage.body.message, '取消全部暂存失败')
+    assert.strictEqual(failedUnstage.body.diagnostics, 'fatal: simulated unstage failure')
+    assert.strictEqual(failedUnstage.body.recovery, undefined, '未知错误不得猜测修正命令')
+    assert.strictEqual(failedUnstage.body.failure.command, 'git reset HEAD -- :/')
+    assert.strictEqual(failedUnstage.body.failure.code, 'GIT_FAILED')
+    assert.strictEqual(failedUnstage.body.failure.stderr, 'fatal: simulated unstage failure')
+    assert.match(failedUnstage.body.failure.diagnostics, /--STATUS--/)
+    const failedContext = latestPending('workbench-session')
+    assert.strictEqual(failedContext.status, 'failed')
+    assert.strictEqual(failedContext.failure.command, 'git reset HEAD -- :/')
+    assert.strictEqual(failedContext.needsAgentAnalysis, true)
+    assert.strictEqual(failedUnstage.body.analysis.proposalId, failedContext.proposalId)
+
+    const analysisRequest = await callHttp(route.handler, {
+      action: 'request-analysis', sessionId: 'workbench-session', proposalId: failedContext.proposalId,
     })
+    assert.strictEqual(analysisRequest.body.ok, true)
+    assert.ok(latestPending('workbench-session').analysisRequestedAt)
+
+    const propose = registered.find((definition) => definition.name === 'git_propose')
+    const repaired = await propose.execute({
+      intent: '修复取消暂存失败',
+      steps: ['git status', 'git reset HEAD -- :/'],
+      explanation: '先确认当前冲突状态，再取消暂存，避免在不明状态下重试。',
+    }, { agent: { id: 'workbench-session', session }, signal: new AbortController().signal })
+    assert.strictEqual(repaired.ok, true)
+    const analyzedProposal = latestPending('workbench-session')
+    assert.strictEqual(analyzedProposal.status, 'pending')
+    assert.deepStrictEqual(analyzedProposal.failure, failedUnstage.body.failure)
+    assert.match(analyzedProposal.recoverySuggestion, /先确认当前冲突状态/)
   } finally { cleanup(dir) }
 })
 

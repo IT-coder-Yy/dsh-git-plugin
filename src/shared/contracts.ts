@@ -13,11 +13,48 @@ export type ActionErrorCode =
   | 'PERMISSION_DENIED'
   | 'INTERNAL_ERROR'
 
-export type ActionFailureReason = 'CURRENT_BRANCH' | 'BRANCH_NOT_FOUND' | 'UNMERGED_BRANCH'
+export type ActionFailureReason =
+  | 'CURRENT_BRANCH'
+  | 'BRANCH_NOT_FOUND'
+  | 'BRANCH_EXISTS'
+  | 'UNMERGED_BRANCH'
+  | 'NO_REMOTE'
+  | 'NO_UPSTREAM'
+  | 'DETACHED_HEAD'
+  | 'DIRTY_WORKTREE'
+  | 'CONFLICTS_PRESENT'
+  | 'REBASE_IN_PROGRESS'
+  | 'NO_REBASE_IN_PROGRESS'
+  | 'REF_NOT_FOUND'
+
+export interface GitFailureContext {
+  source: 'workbench' | 'proposal'
+  code: string
+  action: string
+  command: string
+  message: string
+  stdout: string
+  stderr: string
+  diagnostics: string
+  exitCode: number | null
+  timedOut: boolean
+  mayHavePartialChanges: boolean
+  occurredAt: number
+}
+
+export interface RecoveryProposal {
+  suggestion: string
+  command: string
+  proposalId: string | null
+}
+
+export interface AgentAnalysisRequest {
+  proposalId: string
+}
 
 export type ActionResult<T> =
   | { ok: true; data: T; operationId?: string }
-  | { ok: false; code: ActionErrorCode; message: string; diagnostics?: string; reason?: ActionFailureReason }
+  | { ok: false; code: ActionErrorCode; message: string; diagnostics?: string; reason?: ActionFailureReason; failure?: GitFailureContext; recovery?: RecoveryProposal; analysis?: AgentAnalysisRequest }
 
 export interface RepositoryFile {
   indexStatus: string
@@ -33,6 +70,20 @@ export interface RepositorySummary {
   status: string
   files: RepositoryFile[]
   stagedCount: number
+}
+
+export interface SyncState {
+  topLevel: string
+  branch: string
+  head: string
+  upstream: string
+  remotes: string[]
+  ahead: number
+  behind: number
+  dirty: boolean
+  conflictCount: number
+  rebaseInProgress: boolean
+  files: RepositoryFile[]
 }
 
 export interface BranchSummary {
@@ -134,6 +185,10 @@ export interface ProposalView {
   result: Record<string, unknown> | null
   closed: boolean
   copied: boolean
+  failure?: GitFailureContext
+  recoverySuggestion?: string
+  needsAgentAnalysis?: boolean
+  analysisRequestedAt?: number
 }
 
 export type ProposalStateResponse =
@@ -168,7 +223,9 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
   stdout?: string
   stderr?: string
   diagnostics?: string
-  recovery?: { suggestion: string; command: string; proposalId: string | null } | null
+  failure?: GitFailureContext
+  recovery?: RecoveryProposal | null
+  analysis?: AgentAnalysisRequest
 }
 
 export interface EasyGitRequestMap {
@@ -179,6 +236,7 @@ export interface EasyGitRequestMap {
   'get-commit-detail': { sessionId: string; hash: string }
   'get-commit-diff': { sessionId: string; hash: string }
   'get-stashes': { sessionId: string }
+  'get-sync-state': { sessionId: string }
   'stage-paths': { sessionId: string; operationId: string; paths: string[] }
   'unstage-paths': { sessionId: string; operationId: string; paths: string[] }
   'stage-all': { sessionId: string; operationId: string }
@@ -187,6 +245,13 @@ export interface EasyGitRequestMap {
   'create-branch': { sessionId: string; operationId: string; name: string; base?: string }
   'switch-branch': { sessionId: string; operationId: string; name: string }
   'delete-branch': { sessionId: string; operationId: string; name: string; force?: boolean; confirmRisk?: boolean }
+  fetch: { sessionId: string; operationId: string; remote: string }
+  pull: { sessionId: string; operationId: string }
+  push: { sessionId: string; operationId: string; remote?: string; branch?: string; setUpstream?: boolean }
+  rebase: { sessionId: string; operationId: string; target: string; confirmRisk?: boolean }
+  'rebase-continue': { sessionId: string; operationId: string; confirmRisk?: boolean }
+  'rebase-abort': { sessionId: string; operationId: string; confirmRisk?: boolean }
+  'request-analysis': { sessionId: string; proposalId: string }
   state: { sessionId: string }
   dismiss: { sessionId: string; proposalId: string; manual?: boolean }
   'mark-copied': { sessionId: string; proposalId: string; confirm?: boolean }
@@ -202,6 +267,7 @@ export interface EasyGitResponseMap {
   'get-commit-detail': ActionResult<CommitDetail>
   'get-commit-diff': ActionResult<CommitDiffResult>
   'get-stashes': ActionResult<StashSummary[]>
+  'get-sync-state': ActionResult<SyncState>
   'stage-paths': ActionResult<RepositorySummary>
   'unstage-paths': ActionResult<RepositorySummary>
   'stage-all': ActionResult<RepositorySummary>
@@ -210,6 +276,13 @@ export interface EasyGitResponseMap {
   'create-branch': ActionResult<RepositorySummary>
   'switch-branch': ActionResult<RepositorySummary>
   'delete-branch': ActionResult<RepositorySummary>
+  fetch: ActionResult<SyncState>
+  pull: ActionResult<SyncState>
+  push: ActionResult<SyncState>
+  rebase: ActionResult<SyncState>
+  'rebase-continue': ActionResult<SyncState>
+  'rebase-abort': ActionResult<SyncState>
+  'request-analysis': ProposalCommandResponse
   state: ProposalStateResponse
   dismiss: ProposalCommandResponse
   'mark-copied': ProposalCommandResponse

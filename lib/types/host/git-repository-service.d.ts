@@ -1,5 +1,5 @@
-import type { ActionResult, CommitDetail, CommitDiffResult, CommitSummary, DiffResult, RepositoryReferences, RepositorySummary, StashSummary } from '../shared/contracts';
-export type { BranchSummary, CommitDetail, CommitDiffResult, CommitFileChange, CommitRefSummary, CommitSummary, DiffResult, ReferenceSummary, RepositoryFile, RepositoryReferences, RepositorySummary, StashSummary, } from '../shared/contracts';
+import type { ActionResult, CommitDetail, CommitDiffResult, CommitSummary, DiffResult, RepositoryReferences, RepositorySummary, StashSummary, SyncState } from '../shared/contracts';
+export type { BranchSummary, CommitDetail, CommitDiffResult, CommitFileChange, CommitRefSummary, CommitSummary, DiffResult, ReferenceSummary, RepositoryFile, RepositoryReferences, RepositorySummary, StashSummary, SyncState, } from '../shared/contracts';
 export interface GitRunResult {
     exitCode: number | null;
     signal?: string | null;
@@ -39,6 +39,13 @@ export declare class GitRepositoryService {
     getCommitDetail(workdir: string, hash: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<CommitDetail>>;
     getCommitDiff(workdir: string, hash: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<CommitDiffResult>>;
     getStashes(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<StashSummary[]>>;
+    getSyncState(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<SyncState>>;
+    fetchRemote(request: MutationRequest, remote: unknown): Promise<ActionResult<SyncState>>;
+    pullFfOnly(request: MutationRequest): Promise<ActionResult<SyncState>>;
+    pushCurrent(request: MutationRequest, remote: unknown, branch: unknown, setUpstream: boolean): Promise<ActionResult<SyncState>>;
+    rebaseOnto(request: MutationRequest, target: unknown, confirmRisk: boolean): Promise<ActionResult<SyncState>>;
+    continueRebase(request: MutationRequest, confirmRisk: boolean): Promise<ActionResult<SyncState>>;
+    abortRebase(request: MutationRequest, confirmRisk: boolean): Promise<ActionResult<SyncState>>;
     stagePaths(request: MutationRequest, paths: unknown): Promise<ActionResult<RepositorySummary>>;
     unstagePaths(request: MutationRequest, paths: unknown): Promise<ActionResult<RepositorySummary>>;
     stageAll(request: MutationRequest): Promise<ActionResult<RepositorySummary>>;
@@ -49,5 +56,7 @@ export declare class GitRepositoryService {
     deleteBranch(request: MutationRequest, name: unknown, force: boolean, confirmRisk: boolean): Promise<ActionResult<RepositorySummary>>;
     private validatePaths;
     private mutate;
+    private mutateSync;
+    private mutateAndRead;
     private pruneOperations;
 }

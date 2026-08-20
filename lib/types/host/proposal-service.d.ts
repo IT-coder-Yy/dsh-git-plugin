@@ -1,4 +1,4 @@
-import type { ProposalStatus, ProposalView } from '../shared/contracts';
+import type { GitFailureContext, ProposalStatus, ProposalView } from '../shared/contracts';
 export type { ProposalView } from '../shared/contracts';
 import type { RiskLevel } from './command-policy';
 export interface ProposalStep {
@@ -23,6 +23,7 @@ export interface StoredProposal {
     fingerprint: string | null;
     verified: boolean;
     result: Record<string, unknown> | null;
+    failure?: GitFailureContext;
     [key: string]: unknown;
 }
 export interface ProposalStorageUnit {

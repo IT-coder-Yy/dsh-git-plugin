@@ -1,4 +1,4 @@
-import type { BranchSummary, CommitSummary, RepositoryFile } from '../shared/contracts';
+import type { BranchSummary, CommitSummary, GitFailureContext, RepositoryFile } from '../shared/contracts';
 export type AnyRecord = Record<string, any>;
 export type RepositoryMutationAction = 'stage-paths' | 'unstage-paths' | 'stage-all' | 'unstage-all' | 'commit' | 'create-branch' | 'switch-branch' | 'delete-branch';
 export interface CommandLogEntry {
@@ -91,6 +91,17 @@ export declare function mutationCommand(action: string, payload?: AnyRecord): {
     label: string;
     command: string;
 } | null;
+export declare function recoveryProposalId(response: unknown): string | null;
+export declare function analysisProposalId(response: unknown): string | null;
+export declare function failureContext(response: unknown): GitFailureContext | null;
+export declare function buildAgentRepairPrompt(failure: GitFailureContext): string;
+export declare function shouldShowAnalysisBanner(tab: string, pendingAnalysis: unknown): boolean;
+export declare function canDismissFailedProposal(needsAgentAnalysis: unknown): boolean;
+export declare function pendingProposalTransition(previousProposalId: string | null, proposal: unknown): {
+    proposalId: string | null;
+    shouldOpen: boolean;
+};
+export declare function openRecoveryProposal(response: unknown, open: () => void, schedule?: (callback: () => void, delayMs: number) => unknown): boolean;
 export declare function viewportWidth(): number;
 export declare function sidebarTrackWidth(layout: HostSplitLayout): number;
 export declare function findWorkbenchHostSplit(anchor: HTMLElement): HostSplitLayout | null;

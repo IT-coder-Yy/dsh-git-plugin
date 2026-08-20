@@ -10,6 +10,7 @@
  */
 
 import { registerEasyGitActions, type WebServerService } from './actions'
+import type { GitFailureContext } from '../shared/contracts'
 import {
   ProposalService,
   proposalService,
@@ -112,7 +113,9 @@ interface ProposalExecutionResult extends UnknownRecord {
   stdout: string
   stderr: string
   diagnostics: string
+  failure?: GitFailureContext
   recovery?: { suggestion: string; command: string; proposalId: string | null } | null
+  analysis?: { proposalId: string }
   error: string
 }
 
@@ -360,10 +363,28 @@ async function executeRegisteredProposal(
   const failedStep = proposal.steps.find((step) => step.result?.ok === false)
   const lastResult = (failedStep ? failedStep.result : last?.result) as StepExecutionResult | null | undefined
   const diagnostics = ok ? '' : await captureDiagnostics(shell, proposal.workdir)
+  const error = ok ? '' : redactSecrets((lastResult && (lastResult.stderr || lastResult.stdout)) || 'git 退出码 ' + (lastResult ? lastResult.exitCode : -1))
+  const failure: GitFailureContext | undefined = ok ? undefined : {
+    source: 'proposal',
+    code: lastResult?.timedOut === true ? 'TIMEOUT' : 'GIT_FAILED',
+    action: 'execute',
+    command: failedStep?.command || proposal.command,
+    message: error,
+    stdout: redactSecrets(lastResult ? lastResult.stdout : ''),
+    stderr: redactSecrets(lastResult ? lastResult.stderr : ''),
+    diagnostics,
+    exitCode: lastResult ? lastResult.exitCode : null,
+    timedOut: lastResult?.timedOut === true,
+    mayHavePartialChanges: proposal.steps.some((step) => step !== failedStep && step.result?.ok === true),
+    occurredAt: Date.now(),
+  }
+  proposal.failure = failure
   const recovery = ok ? null : buildRecovery(proposal, failedStep, diagnostics)
-  if (recovery && recovery.command) {
-    const corrected = registerRecoveryProposal(proposal, recovery)
+  if (recovery && recovery.command && failure) {
+    const corrected = registerRecoveryProposal(proposal, recovery, failure)
     if (corrected) recovery.proposalId = corrected.proposalId
+  } else if (!ok && failure) {
+    proposal.needsAgentAnalysis = true
   }
   if (typeof persistStatus === 'function') await persistStatus()
   return {
@@ -377,8 +398,10 @@ async function executeRegisteredProposal(
     stdout: redactSecrets(lastResult ? lastResult.stdout : ''),
     stderr: redactSecrets(lastResult ? lastResult.stderr : ''),
     diagnostics,
+    ...(failure ? { failure } : {}),
     recovery: recovery ? { suggestion: recovery.suggestion, command: recovery.command || '', proposalId: recovery.proposalId || null } : null,
-    error: ok ? '' : redactSecrets((lastResult && (lastResult.stderr || lastResult.stdout)) || 'git 退出码 ' + (lastResult ? lastResult.exitCode : -1)),
+    ...(!ok && failure && !recovery?.command ? { analysis: { proposalId: proposal.proposalId } } : {}),
+    error,
   }
 }
 
@@ -388,8 +411,12 @@ async function executeRegisteredProposal(
  */
 function buildRecovery(_proposal: StoredProposal, failedStep: StoredProposal['steps'][number] | undefined, diagnostics: string): RecoverySuggestion | null {
   if (!failedStep || !failedStep.result) return null
-  const text = String(((failedStep.result.stderr || '') + ' ' + (failedStep.result.stdout || '') + ' ' + (diagnostics || '')).trim())
   const cmd = String(failedStep.command || '')
+  const text = String(((failedStep.result.stderr || '') + ' ' + (failedStep.result.stdout || '') + ' ' + (diagnostics || '')).trim())
+  return buildRecoveryForCommand(cmd, text)
+}
+
+function buildRecoveryForCommand(cmd: string, text: string, reason = ''): RecoverySuggestion | null {
 
   // 1. The execution environment is read-only; change the environment, not the command.
   if (/只读文件系统|read-only file system|EROFS|cannot lock ref|cannot create .*\.lock/i.test(text)) {
@@ -401,11 +428,13 @@ function buildRecovery(_proposal: StoredProposal, failedStep: StoredProposal['st
     if (corrected !== cmd) return { suggestion: '目标文件被 .gitignore 忽略：改用 -f 强制加入（仅针对明确列出的文件）。', command: corrected }
   }
   // 3. An existing target branch can be switched to instead of created.
-  if (/already exists|分支.*已存在|already exist/i.test(text)) {
-    const m = cmd.match(/git\s+(?:switch\s+-c|checkout\s+-b)\s+([^\s]+)/)
-    if (m) {
-      const corrected = cmd.replace(/switch\s+-c/, 'switch').replace(/checkout\s+-b/, 'checkout')
-      return { suggestion: '分支 ' + m[1] + ' 已存在：改为切换到现有分支（或换一个分支名）。', command: corrected }
+  if (reason === 'BRANCH_EXISTS' || /already exist(?:s)?|分支.*已(?:经)?存在/i.test(text)) {
+    const parsed = parseCommand(cmd)
+    const createFlag = parsed.ok ? parsed.args.findIndex((argument) => argument === '-c' || argument === '-b') : -1
+    const branch = parsed.ok && createFlag >= 2 ? parsed.args[createFlag + 1] : undefined
+    if (branch) {
+      const corrected = 'git switch ' + quoteShellArg(branch)
+      return { suggestion: '分支 ' + branch + ' 已存在：改为切换到现有分支（或换一个分支名）。', command: corrected }
     }
   }
   // 4. The target directory is not a Git repository.
@@ -435,8 +464,72 @@ function buildRecovery(_proposal: StoredProposal, failedStep: StoredProposal['st
   return null
 }
 
+async function recoverFailedCommand(
+  activeShell: ShellService | null | undefined,
+  sessionId: string,
+  workdir: string,
+  operationId: string,
+  action: string,
+  command: string,
+  message: string,
+  errorOutput: string,
+  errorCode: string,
+  reason: string,
+): Promise<{
+  failure: GitFailureContext
+  recovery?: { suggestion: string; command: string; proposalId: string | null }
+  analysis?: { proposalId: string }
+} | null> {
+  const operationKey = workdir + '\u0000' + operationId
+  const existing = proposalService.list(sessionId)?.find((proposal) => proposal.recoveryOperationKey === operationKey)
+  if (existing) {
+    if (!existing.failure) return null
+    if (existing.needsAgentAnalysis === true) return { failure: existing.failure, analysis: { proposalId: existing.proposalId } }
+    if (existing.closed || existing.status !== 'pending') return { failure: existing.failure }
+    return { failure: existing.failure, recovery: {
+      suggestion: String(existing.recoverySuggestion || existing.explanation),
+      command: existing.command,
+      proposalId: existing.proposalId,
+    } }
+  }
+  const diagnostics = await captureDiagnostics(activeShell, workdir)
+  const failure: GitFailureContext = {
+    source: 'workbench',
+    code: errorCode,
+    action,
+    command,
+    message,
+    stdout: '',
+    stderr: redactSecrets(errorOutput),
+    diagnostics,
+    exitCode: null,
+    timedOut: errorCode === 'TIMEOUT',
+    mayHavePartialChanges: reason !== 'BRANCH_EXISTS',
+    occurredAt: Date.now(),
+  }
+  const recovery = buildRecoveryForCommand(command, message + '\n' + errorOutput + '\n' + diagnostics, reason)
+  if (!recovery?.command) {
+    const failed = registerFailureProposal(sessionId, workdir, command, failure)
+    if (failed) {
+      failed.recoveryOperationKey = operationKey
+      await proposalService.flush(sessionId)
+    }
+    return { failure, ...(failed ? { analysis: { proposalId: failed.proposalId } } : {}) }
+  }
+  const proposal = registerRecoveryProposal({ sessionId, workdir }, recovery, failure)
+  if (!proposal) return { failure }
+  proposal.recoveryOperationKey = operationKey
+  proposal.recoverySuggestion = recovery.suggestion
+  await proposalService.flush(sessionId)
+  return { failure, recovery: { suggestion: recovery.suggestion, command: recovery.command, proposalId: proposal.proposalId } }
+}
+
 /** Register a recovery command as a pending proposal in the same session. */
-function registerRecoveryProposal(failedProposal: Pick<StoredProposal, 'sessionId' | 'workdir'>, recovery: RecoverySuggestion): StoredProposal | null {
+function registerRecoveryProposal(
+  failedProposal: Pick<StoredProposal, 'sessionId' | 'workdir'>,
+  recovery: RecoverySuggestion,
+  failure?: GitFailureContext,
+): StoredProposal | null {
   if (!recovery.command) return null
   const v = validateCommand(recovery.command)
   if (!v.ok) return null
@@ -450,7 +543,9 @@ function registerRecoveryProposal(failedProposal: Pick<StoredProposal, 'sessionI
     intent: '修正建议：' + recovery.suggestion,
     command: recovery.command.trim(),
     steps: [{ command: recovery.command.trim(), result: null }],
-    explanation: recovery.suggestion + '（由执行失败自动生成，请确认后执行）',
+    explanation: failure
+      ? '原命令：' + failure.command + '\n错误：' + (failure.stderr || failure.message) + '\n修正原因：' + recovery.suggestion
+      : recovery.suggestion + '（由执行失败自动生成，请确认后执行）',
     risk: risk.level,
     reasons: risk.reasons,
     confirmed: false,
@@ -463,10 +558,43 @@ function registerRecoveryProposal(failedProposal: Pick<StoredProposal, 'sessionI
     verified: false,
     status: 'pending',
     recovery: true,
+    recoverySuggestion: recovery.suggestion,
+    ...(failure ? { failure } : {}),
   }
   proposalService.closeOpen(sessionId)
   storeProposal(sessionId, proposal)
   console.log('easygit 修正建议登记', proposal.proposalId, 'session=', sessionId, 'risk=', risk.level)
+  return proposal
+}
+
+function registerFailureProposal(sessionId: string, workdir: string, command: string, failure: GitFailureContext): StoredProposal | null {
+  if (proposalService.hasRunning(sessionId)) return null
+  const risk = classifyRisk(command)
+  const proposal: StoredProposal = {
+    proposalId: proposalService.newId(),
+    sessionId,
+    intent: 'Git 操作失败，等待分析',
+    command,
+    steps: [{ command, result: { ok: false, stderr: failure.stderr, stdout: failure.stdout, exitCode: failure.exitCode } }],
+    explanation: '原命令：' + command + '\n错误：' + (failure.stderr || failure.message),
+    risk: risk.level,
+    reasons: risk.reasons,
+    confirmed: false,
+    workdir,
+    createdAt: failure.occurredAt,
+    result: { ok: false, error: failure.message },
+    closed: false,
+    copied: false,
+    fingerprint: null,
+    verified: false,
+    status: 'failed',
+    failure,
+    recovery: true,
+    needsAgentAnalysis: true,
+  }
+  proposalService.closeOpen(sessionId)
+  storeProposal(sessionId, proposal)
+  console.log('easygit 失败上下文登记', proposal.proposalId, 'session=', sessionId)
   return proposal
 }
 
@@ -602,6 +730,10 @@ const plugin = {
           if (prev && prev.some((proposal) => proposal.status === 'running')) {
             return { ok: false, proposalId: '', intent: String(args.intent || ''), command: '', steps: [], explanation: String(args.explanation || ''), risk: risk.level, reasons: risk.reasons, workdir: workdir || '', error: '同一会话已有提议正在执行，请等待执行结束后再创建新提议' }
           }
+          const analysisSource = prev?.find((candidate) => !candidate.closed
+            && candidate.needsAgentAnalysis === true
+            && typeof candidate.analysisRequestedAt === 'number'
+            && !!candidate.failure)
           proposalService.closeOpen(sessionId)
           const proposal: StoredProposal = {
             proposalId: proposalService.newId(),
@@ -621,6 +753,12 @@ const plugin = {
             fingerprint: null,
             verified: false,
             status: 'pending',
+            ...(analysisSource?.failure ? {
+              failure: analysisSource.failure,
+              recovery: true,
+              recoverySuggestion: String(args.explanation || ''),
+              analyzedFailureProposalId: analysisSource.proposalId,
+            } : {}),
           }
           storeProposal(sessionId, proposal)
           await proposalService.flush(sessionId)
@@ -707,6 +845,9 @@ const plugin = {
       runChecks,
       verifyProposal,
       executeProposal: (activeShell, proposal, policy, persist) => executeRegisteredProposal(activeShell, proposal, undefined, policy, persist),
+      recoverFailedCommand: (sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason) => recoverFailedCommand(
+        shell, sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason,
+      ),
       resolveExecutionPolicy: (sessionId) => {
         const agents = ctx.get<AgentRegistryLike | null>('agents')
         const agent = agents ? agents.get(sessionId) : undefined
@@ -740,12 +881,15 @@ const helpers = {
   executeProposalSteps,
   executeRegisteredProposal,
   buildRecovery,
+  buildRecoveryForCommand,
+  recoverFailedCommand,
   registerRecoveryProposal,
   storeProposal,
   findProposal,
   proposalView,
   latestPending,
   ProposalService,
+  GitRepositoryService,
 }
 
 export = Object.assign(plugin, { helpers })
