@@ -9,6 +9,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-easygit-plugin.svg)](https://www.npmjs.com/package/dsh-easygit-plugin)
 [![GitHub repository](https://img.shields.io/badge/GitHub-Repository-181717?logo=github)](https://github.com/IT-coder-Yy/dsh-git-plugin)
 [![MIT License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
+[![LINUX DO](https://img.shields.io/badge/%E7%A4%BE%E5%8C%BA-LINUX%20DO-f59e0b)](https://linux.do)
 
 [English](README.md) · 简体中文
 
@@ -118,7 +119,7 @@ Web profile 会在输入框旁添加 Git 操作入口，并在原生详情区域
 
 ## 兼容性
 
-最后于 **2026-08-16** 使用 DeepSeek Harness `0.1.0-rc.6` 和 dsh-easygit-plugin `0.2.1` 完成验证。验证范围包括完整项目检查（59 项测试）、构建产物可重复性、DSH Web 启动，以及插件 `/easygit` Host 路由成功响应。
+最后于 **2026-08-20** 使用 DeepSeek Harness `0.1.0-rc.8` 和 dsh-easygit-plugin `0.2.1` 完成验证。验证范围包括完整项目检查（59 项测试）、构建产物可重复性、DSH Web 启动、Git 工作台交互，以及插件 `/easygit` Host 路由成功响应。
 
 ## 开发
 

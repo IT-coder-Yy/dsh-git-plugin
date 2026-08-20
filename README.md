@@ -9,6 +9,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-easygit-plugin.svg)](https://www.npmjs.com/package/dsh-easygit-plugin)
 [![GitHub repository](https://img.shields.io/badge/GitHub-Repository-181717?logo=github)](https://github.com/IT-coder-Yy/dsh-git-plugin)
 [![MIT License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
+[![LINUX DO](https://img.shields.io/badge/community-LINUX%20DO-f59e0b)](https://linux.do)
 
 English · [简体中文](README.zh-CN.md)
 
@@ -118,7 +119,7 @@ Please report vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
 ## Compatibility
 
-Last verified on **2026-08-16** with DeepSeek Harness `0.1.0-rc.6` and dsh-easygit-plugin `0.2.1`. Verification covered the full project check (59 tests), reproducible build artifacts, DSH Web startup, and a successful response from the plugin's `/easygit` host route.
+Last verified on **2026-08-20** with DeepSeek Harness `0.1.0-rc.8` and dsh-easygit-plugin `0.2.1`. Verification covered the full project check (59 tests), reproducible build artifacts, DSH Web startup, the interactive Git workbench, and a successful response from the plugin's `/easygit` host route.
 
 ## Development
 
