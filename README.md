@@ -121,7 +121,7 @@ Please report vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
 ## Compatibility
 
-Last verified on **2026-08-20** with DeepSeek Harness `0.1.0-rc.8` and dsh-easygit-plugin `0.2.1`. Verification covered `npm run check` (68 tests), 24 reproducible build artifacts, a dry-run npm package, a temporary DSH Web-profile composition, and end-to-end Git operations against a temporary local copy of the FastAPI repository. The end-to-end coverage includes repository inspection, diffs, commits, branches, stashes, fetch/pull/push, successful and conflicted Rebases, recovery behavior, and proposal safety checks.
+Last verified on **2026-08-20** with DeepSeek Harness `0.1.0-rc.8` and dsh-easygit-plugin `0.2.3`. Verification covered `npm run check` (68 tests), 24 reproducible build artifacts, a dry-run npm package, a temporary DSH Web-profile composition, and end-to-end Git operations against a temporary local copy of the FastAPI repository. The end-to-end coverage includes repository inspection, diffs, commits, branches, stashes, fetch/pull/push, successful and conflicted Rebases, recovery behavior, and proposal safety checks.
 
 ## Development
 

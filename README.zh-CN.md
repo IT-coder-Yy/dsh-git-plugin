@@ -121,7 +121,7 @@ Web profile 会在输入框旁添加 Git 操作入口，并在原生详情区域
 
 ## 兼容性
 
-最后于 **2026-08-20** 使用 DeepSeek Harness `0.1.0-rc.8` 和 dsh-easygit-plugin `0.2.1` 完成验证。验证范围包括 `npm run check`（68 项测试）、24 个可重复构建产物、npm 发布包 dry-run、临时 DSH Web profile 组合，以及基于 FastAPI 仓库临时本地副本的端到端 Git 操作。端到端范围包括仓库读取、Diff、提交、分支、贮藏、fetch/pull/push、成功与冲突 Rebase、修正建议和提议安全校验。
+最后于 **2026-08-20** 使用 DeepSeek Harness `0.1.0-rc.8` 和 dsh-easygit-plugin `0.2.3` 完成验证。验证范围包括 `npm run check`（68 项测试）、24 个可重复构建产物、npm 发布包 dry-run、临时 DSH Web profile 组合，以及基于 FastAPI 仓库临时本地副本的端到端 Git 操作。端到端范围包括仓库读取、Diff、提交、分支、贮藏、fetch/pull/push、成功与冲突 Rebase、修正建议和提议安全校验。
 
 ## 开发
 

@@ -10,6 +10,8 @@ const React = require('react')
 import { createPanelController, type Dispose, type PanelController } from './panel-controller'
 import {
   WORKBENCH_DEFAULT_RATIO,
+  WORKBENCH_MAX_RATIO,
+  WORKBENCH_MIN_RATIO,
   WORKBENCH_TRACK,
   appendCommandLog,
   analysisProposalId,
@@ -331,6 +333,306 @@ interface SyncTabProps extends RepositoryTabProps {}
           .gg-change-layout { display: grid; grid-template-columns: minmax(175px, 38%) minmax(0, 1fr); align-items: stretch; }
           .gg-diff { min-height: 0; }
         }
+
+        /* EasyGit visual foundation: dense developer tooling, aligned with the host UI. */
+        .gg-workbench {
+          --gg-bg: var(--dsw-alias-bg-base, #f7f7f8);
+          --gg-surface: var(--dsw-alias-bg-layer-1, #fff);
+          --gg-surface-raised: var(--dsw-alias-bg-layer-2, #f1f2f3);
+          --gg-surface-inset: var(--dsw-alias-markdown-code-block, var(--gg-surface-raised));
+          --gg-border: var(--dsw-alias-border-l2, rgba(15, 17, 21, .12));
+          --gg-border-strong: var(--dsw-alias-border-l3, rgba(15, 17, 21, .18));
+          --gg-text: var(--dsw-alias-label-primary, #0f1115);
+          --gg-text-secondary: var(--dsw-alias-label-secondary, #353638);
+          --gg-text-muted: var(--dsw-alias-label-tertiary, #666a70);
+          --gg-text-caption: var(--dsw-alias-label-caption, #81858c);
+          --gg-accent: var(--dsw-alias-state-business-primary, #3964fe);
+          --gg-accent-strong: var(--dsw-alias-state-business-primary, #3964fe);
+          --gg-accent-soft: color-mix(in srgb, var(--gg-accent) 14%, transparent);
+          --gg-success: var(--dsw-alias-state-success-primary, #169c46);
+          --gg-success-label: color-mix(in srgb, var(--gg-success) 64%, var(--gg-text));
+          --gg-warning: var(--dsw-alias-state-warn-primary, #b66a00);
+          --gg-warning-label: var(--dsw-alias-state-warn-label, #9d5d00);
+          --gg-danger: var(--dsw-alias-state-error-primary, #d13f3f);
+          --gg-danger-label: color-mix(in srgb, var(--gg-danger) 82%, var(--gg-text));
+          --gg-text-subtle: color-mix(in srgb, var(--gg-text-muted) 72%, var(--gg-text));
+          --gg-radius: 8px;
+          --gg-radius-control: 6px;
+          --gg-focus: 0 0 0 2px color-mix(in srgb, var(--gg-accent) 28%, transparent);
+          container-name: easygit-workbench;
+          container-type: inline-size;
+          border-left-color: var(--gg-border-strong);
+          color: var(--gg-text);
+          background: var(--gg-bg);
+          box-shadow: var(--dsw-shadow-lv1, -12px 0 32px rgba(0, 0, 0, .12));
+          font-family: var(--dsw-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif);
+          font-size: 13px;
+          line-height: 1.5;
+          color-scheme: inherit;
+        }
+        .gg-workbench *, .gg-dock * { box-sizing: border-box; }
+        .gg-workbench code, .gg-workbench pre, .gg-dock code, .gg-dock pre,
+        .gg-command-code, .gg-review, .gg-diff-code, .gg-stepcode {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+        .gg-workbench ::selection, .gg-dock ::selection { color: var(--gg-text, #0f1115); background: color-mix(in srgb, var(--gg-accent, #3964fe) 28%, transparent); }
+        .gg-workbench ::-webkit-scrollbar { width: 9px; height: 9px; }
+        .gg-workbench ::-webkit-scrollbar-track { background: transparent; }
+        .gg-workbench ::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: var(--dsw-alias-scrollbar-bg-l2, var(--gg-border-strong)); background-clip: padding-box; }
+        .gg-workbench ::-webkit-scrollbar-thumb:hover { background: var(--dsw-alias-scrollbar-hover-l2, var(--gg-text-caption)); background-clip: padding-box; }
+
+        .gg-workbench-head {
+          min-height: 74px;
+          padding: 14px 16px;
+          border-bottom-color: var(--gg-border);
+          background: var(--gg-bg);
+        }
+        .gg-workbench-title { color: var(--gg-text); font-size: 16px; line-height: 22px; font-weight: 650; letter-spacing: -.015em; }
+        .gg-workbench-close {
+          width: 32px;
+          height: 32px;
+          border-radius: var(--gg-radius-control);
+          color: var(--gg-text-muted);
+          font-size: 21px;
+          line-height: 1;
+          transition: color 120ms ease, background-color 120ms ease, transform 120ms ease;
+        }
+        .gg-workbench-close:hover:not(:disabled) { color: var(--gg-text); background: var(--gg-surface-raised); }
+        .gg-workbench-close:active:not(:disabled) { transform: translateY(1px); }
+        .gg-workbench-body { padding: 0 12px 12px; }
+        .gg-workbench-resize::after { left: 5px; width: 1px; background: var(--gg-border-strong); }
+        .gg-workbench-resize:hover::after, .gg-workbench-resize:focus-visible::after, .gg-workbench-resize.dragging::after {
+          background: var(--gg-accent);
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--gg-accent) 18%, transparent);
+        }
+        .gg-workbench-resize:focus-visible { outline-color: var(--gg-accent); }
+
+        .gg-tabs {
+          position: sticky;
+          top: 0;
+          z-index: 2;
+          gap: 2px;
+          overflow-x: auto;
+          margin: 0 -12px;
+          padding: 8px 12px 0;
+          border-bottom-color: var(--gg-border);
+          background: var(--gg-bg);
+          scrollbar-width: none;
+        }
+        .gg-tabs::-webkit-scrollbar { display: none; }
+        .gg-tab {
+          min-height: 34px;
+          border: 0;
+          border-bottom: 2px solid transparent;
+          border-radius: 0;
+          padding: 6px 9px 7px;
+          color: var(--gg-text-muted);
+          font-size: 12.5px;
+          font-weight: 500;
+          transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+        }
+        .gg-tab:hover:not(:disabled) { color: var(--gg-text-secondary); background: var(--dsw-alias-interactive-bg-hover, var(--gg-accent-soft)); }
+        .gg-tab.active { border-color: var(--gg-accent); color: var(--gg-text); background: transparent; font-weight: 650; }
+        .gg-tab:focus-visible { outline: 2px solid var(--gg-accent); outline-offset: -3px; }
+        .gg-tab:active:not(:disabled) { transform: translateY(1px); }
+        .gg-tab-content { gap: 12px; padding-top: 12px; }
+        .gg-tab-panel { min-height: 0; }
+        .gg-tab-toolbar { min-height: 34px; gap: 8px; }
+        .gg-tab-toolbar > .gg-idletext:first-child, .gg-repository-identity { margin-right: auto; }
+        .gg-section-heading { margin-right: auto; color: var(--gg-text); font-size: 14px; line-height: 22px; font-weight: 680; letter-spacing: -.01em; }
+        .gg-section-count { display: inline-grid; min-width: 21px; height: 21px; margin-left: 7px; place-items: center; border-radius: 999px; padding: 0 6px; color: var(--gg-text-secondary); background: var(--gg-surface-raised); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 21px; font-weight: 650; }
+        .gg-repository-identity { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 2px 0; }
+        .gg-repository-name { min-width: 0; overflow: hidden; color: var(--gg-text); font-size: 16px; line-height: 24px; font-weight: 680; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
+        .gg-repository-arrow { flex: none; color: var(--gg-text-caption); font-size: 13px; }
+        .gg-repository-branch { min-width: 0; overflow: hidden; border-radius: 5px; padding: 2px 6px; color: var(--gg-accent); background: var(--gg-accent-soft); font-size: 13px; line-height: 20px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+
+        .gg-btn {
+          min-height: 30px;
+          border-color: var(--gg-border-strong);
+          border-radius: var(--gg-radius-control);
+          padding: 5px 10px;
+          color: var(--gg-text-secondary);
+          background: var(--gg-surface);
+          font-family: inherit;
+          font-size: 12px;
+          line-height: 18px;
+          font-weight: 550;
+          white-space: nowrap;
+          transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+        }
+        .gg-btn:hover:not(:disabled) { border-color: var(--gg-border-strong); color: var(--gg-text); background: var(--dsw-alias-interactive-bg-hover, var(--gg-surface-raised)); }
+        .gg-btn:focus-visible { outline: none; box-shadow: var(--gg-focus); }
+        .gg-btn:active:not(:disabled) { transform: translateY(1px); }
+        .gg-btn:disabled { opacity: .42; }
+        .gg-btn.primary {
+          border-color: var(--dsw-alias-button-primary-fill, var(--gg-accent));
+          color: var(--dsw-alias-label-primary-foreground, #fff);
+          background: var(--dsw-alias-button-primary-fill, var(--gg-accent));
+        }
+        .gg-btn.primary:hover:not(:disabled) { border-color: var(--dsw-alias-button-primary-hover, var(--gg-accent-strong)); color: var(--dsw-alias-label-primary-foreground, #fff); background: var(--dsw-alias-button-primary-hover, var(--gg-accent-strong)); }
+        .gg-btn.danger { border-color: var(--gg-danger); color: var(--dsw-alias-label-primary-foreground, #fff); background: var(--gg-danger); }
+        .gg-btn.danger:hover:not(:disabled) { border-color: var(--gg-danger); color: var(--dsw-alias-label-primary-foreground, #fff); background: color-mix(in srgb, var(--gg-danger) 86%, var(--gg-text)); }
+        .gg-review-mode { min-height: 28px; padding: 4px 8px; font-size: 11.5px; }
+        .gg-review-mode.active { border-color: var(--gg-accent); color: var(--gg-accent-strong); background: var(--gg-accent-soft); }
+
+        .gg-input, .gg-sync-row select, .gg-sync-actions > select {
+          min-height: 34px;
+          border: 1px solid var(--gg-border-strong);
+          border-radius: var(--gg-radius-control);
+          padding: 6px 9px;
+          color: var(--gg-text);
+          background: var(--gg-surface-inset);
+          font-family: inherit;
+          font-size: 12px;
+          line-height: 20px;
+          transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+        }
+        .gg-input::placeholder { color: var(--gg-text-muted); opacity: .9; }
+        .gg-input:hover:not(:disabled), .gg-sync-row select:hover:not(:disabled), .gg-sync-actions > select:hover:not(:disabled) { border-color: var(--gg-text-caption); }
+        .gg-input:focus, .gg-sync-row select:focus, .gg-sync-actions > select:focus {
+          outline: none;
+          border-color: var(--gg-accent);
+          box-shadow: var(--gg-focus);
+          background: var(--gg-bg);
+        }
+        .gg-field { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+        .gg-field-label { color: var(--gg-text-secondary); font-size: 11.5px; line-height: 17px; font-weight: 620; }
+        .gg-field-help { color: var(--gg-text-subtle); font-size: 11px; line-height: 16px; }
+        .gg-branch-form .gg-btn.primary { align-self: end; }
+        .gg-loading { display: grid; min-height: 180px; place-items: center; border: 1px solid var(--gg-border); border-radius: var(--gg-radius); background: var(--gg-surface); }
+        .gg-loading-inner { display: flex; width: min(260px, 72%); flex-direction: column; gap: 9px; }
+        .gg-loading-label { margin-bottom: 2px; color: var(--gg-text-subtle); font-size: 12px; text-align: center; }
+        .gg-loading-bar { height: 8px; border-radius: 999px; background: var(--gg-surface-raised); transform-origin: left center; }
+        .gg-loading-bar:nth-child(2) { width: 100%; }
+        .gg-loading-bar:nth-child(3) { width: 78%; }
+        .gg-loading-bar:nth-child(4) { width: 56%; }
+        @media (prefers-reduced-motion: no-preference) {
+          .gg-loading-bar { animation: gg-loading-pulse 1.4s ease-in-out infinite alternate; }
+          .gg-loading-bar:nth-child(3) { animation-delay: 100ms; }
+          .gg-loading-bar:nth-child(4) { animation-delay: 200ms; }
+        }
+        @keyframes gg-loading-pulse { from { opacity: .45; transform: scaleX(.94); } to { opacity: 1; transform: scaleX(1); } }
+        .gg-check { min-height: 30px; gap: 8px; color: var(--gg-text-secondary); }
+        .gg-check input { width: 15px; height: 15px; accent-color: var(--gg-accent); }
+
+        .gg-idletext, .gg-intent, .gg-sync-note { color: var(--gg-text-subtle); opacity: 1; }
+        .gg-workbench-error, .gg-fail, .gg-riskline { color: var(--gg-danger-label); }
+        .gg-ok { color: var(--gg-success-label); }
+        .gg-badge { padding: 2px 8px; line-height: 18px; }
+        .gg-badge.safe { color: var(--gg-success); background: color-mix(in srgb, var(--gg-success) 12%, transparent); }
+        .gg-badge.normal { color: var(--gg-warning-label); background: color-mix(in srgb, var(--gg-warning) 12%, transparent); }
+        .gg-badge.hard { color: var(--gg-danger); background: color-mix(in srgb, var(--gg-danger) 12%, transparent); }
+
+        .gg-file-group, .gg-branch-list, .gg-commit-list, .gg-stash-list,
+        .gg-commit-form, .gg-branch-form, .gg-sync-actions, .gg-diff, .gg-commit-detail {
+          border-color: var(--gg-border);
+          border-radius: var(--gg-radius);
+          background: var(--gg-surface);
+        }
+        .gg-file-group, .gg-branch-list, .gg-commit-form, .gg-branch-form, .gg-sync-actions, .gg-diff { padding: 9px; }
+        .gg-file-group > strong, .gg-sync-card strong, .gg-sync-actions > strong { color: var(--gg-text-secondary); font-size: 13.5px; line-height: 21px; font-weight: 680; }
+        .gg-file-group > strong { display: flex; align-items: center; }
+        .gg-folder-toggle { min-height: 30px; border-radius: 5px; color: var(--gg-text-secondary); }
+        .gg-folder-toggle:hover { color: var(--gg-text); background: var(--dsw-alias-interactive-bg-hover, var(--gg-accent-soft)); }
+        .gg-folder-toggle:focus-visible, .gg-file-path:focus-visible { outline: 2px solid var(--gg-accent); outline-offset: 1px; }
+        .gg-folder-arrow { color: var(--gg-text-muted); }
+        .gg-file, .gg-branch-row { min-height: 34px; border-bottom-color: var(--dsw-alias-border-l1, var(--gg-border)); }
+        .gg-file.active { border-radius: 5px; background: var(--gg-accent-soft); }
+        .gg-file-path code { color: inherit; font-size: 12.25px; line-height: 19px; }
+        .gg-file.added code { color: var(--gg-success-label); }
+        .gg-file.deleted code { color: var(--gg-danger-label); }
+        .gg-file.modified code { color: var(--gg-warning); }
+        .gg-branch-row.current { border-radius: 6px; padding-right: 6px; padding-left: 6px; background: var(--gg-accent-soft); }
+        .gg-branch-row.current > code:first-child { color: var(--gg-accent); font-size: 13px; font-weight: 700; }
+        .gg-reference-hash { color: var(--gg-text-caption); }
+
+        .gg-sync-grid { gap: 8px; }
+        .gg-sync-card { min-height: 68px; border-color: var(--gg-border); border-radius: var(--gg-radius); padding: 10px; background: var(--gg-surface); }
+        .gg-sync-value { color: var(--gg-text); font-size: 14px; line-height: 21px; font-weight: 620; }
+        .gg-sync-row { align-items: end; }
+        .gg-sync-warning, .gg-analysis, .gg-failure-card, .gg-branch-confirm, .gg-diagnostics {
+          border-radius: var(--gg-radius);
+        }
+        .gg-sync-warning { border-color: color-mix(in srgb, var(--gg-warning) 34%, transparent); color: var(--gg-warning-label); background: color-mix(in srgb, var(--gg-warning) 8%, transparent); }
+        .gg-analysis { border-color: color-mix(in srgb, var(--gg-warning) 34%, transparent); background: color-mix(in srgb, var(--gg-warning) 7%, transparent); }
+        .gg-failure-card, .gg-branch-confirm, .gg-diagnostics { border-color: color-mix(in srgb, var(--gg-danger) 38%, transparent); background: color-mix(in srgb, var(--gg-danger) 7%, transparent); }
+
+        .gg-review, .gg-diff-code, .gg-pre, .gg-commit-message { border-radius: 6px; background: var(--gg-surface-inset); }
+        .gg-diff > .gg-intent { color: var(--gg-text); font-size: 13.5px; line-height: 21px; font-weight: 650; }
+        .gg-review { line-height: 1.6; }
+        .gg-review-number { color: var(--gg-text-caption); background: color-mix(in srgb, var(--gg-text) 3%, transparent); }
+        .gg-review-code, .gg-diff-context { color: var(--gg-text-secondary); }
+        .gg-review-line.added, .gg-diff-added { color: var(--gg-success-label); background: color-mix(in srgb, var(--gg-success) 18%, transparent); }
+        .gg-review-line.deleted, .gg-diff-deleted { color: var(--gg-danger-label); background: color-mix(in srgb, var(--gg-danger) 18%, transparent); }
+        .gg-review-skip, .gg-diff-modified { color: var(--gg-warning-label); background: color-mix(in srgb, var(--gg-warning) 14%, transparent); }
+        .gg-review-annotation, .gg-diff-meta { color: var(--gg-text-muted); background: color-mix(in srgb, var(--gg-text) 5%, transparent); }
+
+        .gg-command-log { min-height: 144px; max-height: 260px; border-top-color: var(--gg-border); background: var(--gg-surface-inset); }
+        .gg-command-log-head { padding: 8px 12px 4px; color: var(--gg-text-secondary); font-size: 11.5px; letter-spacing: .01em; }
+        .gg-command-log-body { padding: 0 12px 9px; }
+        .gg-command-entry { padding: 5px 0; border-bottom: 1px solid var(--dsw-alias-border-l1, var(--gg-border)); }
+        .gg-command-entry:last-child { border-bottom: 0; }
+        .gg-command-label { color: var(--gg-warning); }
+        .gg-command-status.running { color: var(--gg-warning); }
+        .gg-command-status.succeeded { color: var(--gg-success-label); }
+        .gg-command-status.failed { color: var(--gg-danger-label); }
+        .gg-command-code { color: var(--gg-text-secondary); }
+
+        .gg-head { color: var(--gg-text); font-size: 14px; line-height: 22px; font-weight: 680; }
+        .gg-stepcode { color: var(--gg-text-secondary); background: var(--gg-surface-raised); }
+        .gg-failure-label { color: var(--gg-danger-label); }
+        .gg-failure-value, .gg-diagnostics { color: var(--gg-text-secondary); }
+        .gg-commit-row:hover, .gg-commit-row.active { background: var(--gg-accent-soft); }
+        .gg-commit-row:focus-visible { outline-color: var(--gg-accent); }
+        .gg-commit-subject { color: var(--gg-text); font-size: 13.25px; line-height: 19px; font-weight: 620; }
+        .gg-commit-meta, .gg-commit-detail-meta dt, .gg-commit-summary, .gg-stash-meta { color: var(--gg-text-muted); }
+        .gg-commit-hash, .gg-commit-detail-hash, .gg-stash-hash { color: var(--gg-text-caption); }
+        .gg-commit-detail-title { color: var(--gg-text); font-size: 15px; line-height: 22px; font-weight: 680; }
+        .gg-commit-message, .gg-commit-file-path { color: var(--gg-text-secondary); }
+        .gg-commit-files { border-color: var(--gg-border); border-radius: 6px; }
+        .gg-commit-file, .gg-stash-row { border-bottom-color: var(--dsw-alias-border-l1, var(--gg-border)); }
+        .gg-commit-file.added, .gg-additions { color: var(--gg-success-label); }
+        .gg-commit-file.deleted, .gg-deletions { color: var(--gg-danger-label); }
+        .gg-commit-file.modified { color: var(--gg-warning); }
+        .gg-stash-selector { color: var(--gg-accent); font-size: 12.5px; font-weight: 650; }
+        .gg-stash-subject { color: var(--gg-text); font-size: 13px; line-height: 20px; font-weight: 580; }
+        .gg-ref.branch, .gg-ref.current { color: var(--gg-accent); background: var(--gg-accent-soft); }
+        .gg-ref.remote { color: var(--gg-warning-label); background: color-mix(in srgb, var(--gg-warning) 12%, transparent); }
+        .gg-ref.tag { color: color-mix(in srgb, #9d5bd2 72%, var(--gg-text)); background: color-mix(in srgb, #9d5bd2 12%, transparent); }
+
+        .gg-dock-full { border-color: var(--gg-border, rgba(127, 127, 127, .35)); border-radius: var(--gg-radius, 8px); background: var(--gg-surface, rgba(127, 127, 127, .06)); }
+        .gg-workbench-action:active:not(:disabled) { transform: translateY(1px); }
+
+        /* Container width, not viewport width, decides when the two-pane change view is safe. */
+        .gg-change-layout { display: flex; }
+        @container easygit-workbench (min-width: 560px) {
+          .gg-change-layout { display: grid; grid-template-columns: minmax(210px, 36%) minmax(0, 1fr); align-items: stretch; }
+          .gg-diff { min-height: 0; }
+        }
+        @container easygit-workbench (max-width: 380px) {
+          .gg-workbench-head { min-height: 74px; padding: 11px 12px; }
+          .gg-workbench-body { padding-right: 8px; padding-left: 8px; }
+          .gg-tabs { margin-right: -8px; margin-left: -8px; padding-right: 8px; padding-left: 8px; }
+          .gg-tab { padding-right: 8px; padding-left: 8px; }
+          .gg-sync-grid { grid-template-columns: 1fr; }
+        }
+        @container easygit-workbench (max-width: 520px) {
+          .gg-tab-toolbar .gg-repository-identity, .gg-tab-toolbar .gg-section-heading { width: 100%; flex-basis: 100%; }
+          .gg-repository-name { font-size: 15px; }
+          .gg-branch-form { display: grid; grid-template-columns: 1fr; }
+          .gg-branch-form .gg-btn.primary { width: 100%; }
+          .gg-sync-row { grid-template-columns: 1fr; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .gg-workbench *, .gg-workbench *::before, .gg-workbench *::after,
+          .gg-dock *, .gg-dock *::before, .gg-dock *::after {
+            scroll-behavior: auto !important;
+            transition-duration: .01ms !important;
+            animation-duration: .01ms !important;
+            animation-iteration-count: 1 !important;
+          }
+        }
       `
       document.head.appendChild(tag)
       return () => { try { tag.remove() } catch (e) { /* ignore */ } }
@@ -496,6 +798,30 @@ interface SyncTabProps extends RepositoryTabProps {}
 
     function renderReviewSurface(diff: string) {
       return React.createElement('div', { className: 'gg-review-content' }, renderReview(diff))
+    }
+
+    function renderRepositoryIdentity(topLevel: unknown, branch: unknown) {
+      const name = repositoryName(topLevel)
+      const currentBranch = String(branch || '分离 HEAD')
+      return React.createElement('div', {
+        className: 'gg-repository-identity',
+        'aria-label': name + '，当前分支 ' + currentBranch,
+      },
+      React.createElement('span', { className: 'gg-repository-name', title: name }, name),
+      React.createElement('span', { className: 'gg-repository-arrow', 'aria-hidden': 'true' }, '→'),
+      React.createElement('code', { className: 'gg-repository-branch', title: currentBranch }, currentBranch),
+      )
+    }
+
+    function renderLoadingState(label: string) {
+      return React.createElement('div', { className: 'gg-loading', role: 'status', 'aria-live': 'polite' },
+        React.createElement('div', { className: 'gg-loading-inner' },
+          React.createElement('span', { className: 'gg-loading-label' }, label),
+          React.createElement('span', { className: 'gg-loading-bar', 'aria-hidden': 'true' }),
+          React.createElement('span', { className: 'gg-loading-bar', 'aria-hidden': 'true' }),
+          React.createElement('span', { className: 'gg-loading-bar', 'aria-hidden': 'true' }),
+        ),
+      )
     }
 
     function GitChangesTab(props: RepositoryTabProps) {
@@ -674,33 +1000,36 @@ interface SyncTabProps extends RepositoryTabProps {}
 
       return React.createElement('section', { className: 'gg-tab-content' },
         React.createElement('div', { className: 'gg-tab-toolbar' },
-          React.createElement('span', { className: 'gg-idletext' }, summary
-            ? repositoryName(summary.topLevel) + ' → ' + String(summary.branch || summary.head || '分离 HEAD')
-            : '正在读取仓库…'),
+          summary
+            ? renderRepositoryIdentity(summary.topLevel, summary.branch || summary.head)
+            : React.createElement('span', { className: 'gg-section-heading' }, '正在读取仓库…'),
           React.createElement('button', {
             className: 'gg-btn', disabled: busy || refreshFeedback.state === 'loading',
             onClick: () => { void load(true) },
           }, refreshButtonLabel(refreshFeedback.state)),
-          React.createElement('button', { className: 'gg-btn', disabled: busy, onClick: () => runMutation('stage-all') }, '全部暂存'),
-          React.createElement('button', { className: 'gg-btn', disabled: busy, onClick: () => runMutation('unstage-all') }, '全部取消暂存'),
+          React.createElement('button', { className: 'gg-btn', disabled: busy || !summary, onClick: () => runMutation('stage-all') }, '全部暂存'),
+          React.createElement('button', { className: 'gg-btn', disabled: busy || !summary, onClick: () => runMutation('unstage-all') }, '全部取消暂存'),
         ),
         message ? React.createElement('div', { className: 'gg-workbench-error' }, message) : null,
         diagnostics ? React.createElement('pre', { className: 'gg-diagnostics' }, diagnostics) : null,
-        React.createElement('div', { className: 'gg-change-layout' },
+        summary ? React.createElement('div', { className: 'gg-change-layout' },
           React.createElement('div', { className: 'gg-change-files' },
             React.createElement('div', { className: 'gg-file-group' },
-              React.createElement('strong', null, '未暂存 (' + unstagedFiles.length + ')'),
+              React.createElement('strong', null, '未暂存', React.createElement('span', { className: 'gg-section-count' }, String(unstagedFiles.length))),
               unstagedFiles.length ? renderFileTree(unstagedFiles, false, 'unstaged') : React.createElement('div', { className: 'gg-idletext' }, '没有未暂存的变更。'),
             ),
             React.createElement('div', { className: 'gg-file-group' },
-              React.createElement('strong', null, '已暂存 (' + stagedFiles.length + ')'),
+              React.createElement('strong', null, '已暂存', React.createElement('span', { className: 'gg-section-count' }, String(stagedFiles.length))),
               stagedFiles.length ? renderFileTree(stagedFiles, true, 'staged') : React.createElement('div', { className: 'gg-idletext' }, '没有已暂存的变更。'),
             ),
             React.createElement('div', { className: 'gg-commit-form' },
-              React.createElement('input', {
-                className: 'gg-input', value: commitMessage, placeholder: '提交说明', disabled: busy,
-                onChange: (event: AnyRecord) => setCommitMessage(String(event.target.value || '')),
-              }),
+              React.createElement('label', { className: 'gg-field', htmlFor: 'gg-commit-message' },
+                React.createElement('span', { className: 'gg-field-label' }, '提交说明'),
+                React.createElement('input', {
+                  id: 'gg-commit-message', className: 'gg-input', value: commitMessage, placeholder: '例如：fix: 修复登录状态', disabled: busy,
+                  onChange: (event: AnyRecord) => setCommitMessage(String(event.target.value || '')),
+                }),
+              ),
               React.createElement('button', {
                 className: 'gg-btn primary', disabled: busy || !commitMessage.trim() || stagedFiles.length === 0,
                 onClick: () => runMutation('commit', { message: commitMessage }).then((succeeded: boolean) => { if (succeeded) setCommitMessage('') }),
@@ -719,7 +1048,7 @@ interface SyncTabProps extends RepositoryTabProps {}
                 renderRawDiffSurface(selected ? diff : '尚未选择文件。'),
               ),
           ),
-        ),
+        ) : renderLoadingState('正在读取仓库状态'),
       )
     }
 
@@ -853,6 +1182,7 @@ interface SyncTabProps extends RepositoryTabProps {}
 
       return React.createElement('section', { className: 'gg-tab-content' },
         React.createElement('div', { className: 'gg-tab-toolbar' },
+          React.createElement('span', { className: 'gg-section-heading' }, '分支与引用'),
           React.createElement('button', {
             className: 'gg-btn', disabled: busy || refreshFeedback.state === 'loading',
             onClick: () => { void load(true) },
@@ -869,15 +1199,18 @@ interface SyncTabProps extends RepositoryTabProps {}
           'aria-selected': referenceTab === entry.id, onClick: () => setReferenceTab(entry.id),
         }, entry.label))),
         referenceTab === 'local' ? React.createElement('div', { className: 'gg-local-branches' },
-          React.createElement('input', {
-            className: 'gg-input', type: 'search', value: branchQuery, placeholder: '搜索本地分支',
-            'aria-label': '搜索本地分支', onChange: (event: AnyRecord) => setBranchQuery(String(event.target.value || '')),
-          }),
+          React.createElement('label', { className: 'gg-field', htmlFor: 'gg-branch-search' },
+            React.createElement('span', { className: 'gg-field-label' }, '搜索分支'),
+            React.createElement('input', {
+              id: 'gg-branch-search', className: 'gg-input', type: 'search', value: branchQuery, placeholder: '输入分支名称',
+              onChange: (event: AnyRecord) => setBranchQuery(String(event.target.value || '')),
+            }),
+          ),
           React.createElement('div', { className: 'gg-branch-list' }, visibleBranches.length ? visibleBranches.map((branch: BranchSummary, index: number) => {
           const branchName = String(branch.name || '')
           const confirming = confirmDelete === branchName
           const forcing = forceDelete === branchName
-          return React.createElement('div', { className: 'gg-branch-row' + (confirming || forcing ? ' confirming' : ''), key: branchName || String(index) },
+          return React.createElement('div', { className: 'gg-branch-row' + (branch.current ? ' current' : '') + (confirming || forcing ? ' confirming' : ''), key: branchName || String(index) },
             React.createElement('code', null, (branch.current ? '* ' : '') + branchName),
             branch.upstream ? React.createElement('span', { className: 'gg-idletext' }, String(branch.upstream)) : null,
             branch.current ? null : React.createElement('button', { className: 'gg-btn', disabled: busy, onClick: () => { cancelDelete(); mutate('switch-branch', { name: branchName }) } }, '切换'),
@@ -908,8 +1241,14 @@ interface SyncTabProps extends RepositoryTabProps {}
           ? React.createElement('div', { className: 'gg-branch-list' }, referenceRows(remotes, '没有远程分支。'))
           : React.createElement('div', { className: 'gg-branch-list' }, referenceRows(tags, '没有标签。')),
         referenceTab === 'local' ? React.createElement('div', { className: 'gg-branch-form' },
-          React.createElement('input', { className: 'gg-input', value: name, placeholder: '新分支名称', disabled: busy, onChange: (event: AnyRecord) => setName(String(event.target.value || '')) }),
-          React.createElement('input', { className: 'gg-input', value: base, placeholder: '基础分支', disabled: busy, onChange: (event: AnyRecord) => setBase(String(event.target.value || '')) }),
+          React.createElement('label', { className: 'gg-field', htmlFor: 'gg-new-branch-name' },
+            React.createElement('span', { className: 'gg-field-label' }, '新分支名称'),
+            React.createElement('input', { id: 'gg-new-branch-name', className: 'gg-input', value: name, placeholder: '例如：feature/login', disabled: busy, onChange: (event: AnyRecord) => setName(String(event.target.value || '')) }),
+          ),
+          React.createElement('label', { className: 'gg-field', htmlFor: 'gg-new-branch-base' },
+            React.createElement('span', { className: 'gg-field-label' }, '基础分支'),
+            React.createElement('input', { id: 'gg-new-branch-base', className: 'gg-input', value: base, placeholder: '例如：main', disabled: busy, onChange: (event: AnyRecord) => setBase(String(event.target.value || '')) }),
+          ),
           React.createElement('button', {
             className: 'gg-btn primary', disabled: busy || !name.trim() || !base.trim(),
             onClick: () => mutate('create-branch', { name, base }),
@@ -943,7 +1282,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         className: 'gg-commit-graph', width, height: 36, viewBox: `0 0 ${width} 36`, 'aria-hidden': 'true',
       },
       paths,
-      merge ? React.createElement('circle', { cx: laneX(row.lane), cy: 11, r: 7, fill: '#202224', stroke: nodeColor, strokeWidth: 2 }) : null,
+      merge ? React.createElement('circle', { cx: laneX(row.lane), cy: 11, r: 7, fill: 'var(--gg-surface)', stroke: nodeColor, strokeWidth: 2 }) : null,
       React.createElement('circle', { cx: laneX(row.lane), cy: 11, r: merge ? 3 : 5, fill: nodeColor }),
       )
     }
@@ -1154,10 +1493,13 @@ interface SyncTabProps extends RepositoryTabProps {}
           ) : null,
         )
       return React.createElement('section', { className: 'gg-tab-content' },
-        React.createElement('div', { className: 'gg-tab-toolbar' }, React.createElement('button', {
-          className: 'gg-btn', disabled: refreshFeedback.state === 'loading',
-          onClick: () => { void load(true) },
-        }, refreshButtonLabel(refreshFeedback.state))),
+        React.createElement('div', { className: 'gg-tab-toolbar' },
+          React.createElement('span', { className: 'gg-section-heading' }, '提交记录', React.createElement('span', { className: 'gg-section-count' }, String(commits.length))),
+          React.createElement('button', {
+            className: 'gg-btn', disabled: refreshFeedback.state === 'loading',
+            onClick: () => { void load(true) },
+          }, refreshButtonLabel(refreshFeedback.state)),
+        ),
         message ? React.createElement('div', { className: 'gg-workbench-error' }, message) : null,
         React.createElement('div', { className: 'gg-commit-layout' },
           React.createElement('div', { className: 'gg-commit-list' }, rows.length ? rows.map((row: CommitGraphRow, index: number) => {
@@ -1225,7 +1567,7 @@ interface SyncTabProps extends RepositoryTabProps {}
 
       return React.createElement('section', { className: 'gg-tab-content' },
         React.createElement('div', { className: 'gg-tab-toolbar' },
-          React.createElement('span', { className: 'gg-idletext' }, '贮藏 (' + stashes.length + ')'),
+          React.createElement('span', { className: 'gg-section-heading' }, '贮藏', React.createElement('span', { className: 'gg-section-count' }, String(stashes.length))),
           React.createElement('button', { className: 'gg-btn', type: 'button', disabled: loading, onClick: load }, loading ? '正在刷新…' : '刷新'),
         ),
         message ? React.createElement('div', { className: 'gg-workbench-error' }, message) : null,
@@ -1354,9 +1696,9 @@ interface SyncTabProps extends RepositoryTabProps {}
 
       return React.createElement('section', { className: 'gg-tab-content' },
         React.createElement('div', { className: 'gg-tab-toolbar' },
-          React.createElement('span', { className: 'gg-idletext' }, state
-            ? repositoryName(state.topLevel) + ' → ' + (state.branch || '分离 HEAD')
-            : '正在读取仓库…'),
+          state
+            ? renderRepositoryIdentity(state.topLevel, state.branch)
+            : React.createElement('span', { className: 'gg-section-heading' }, '正在读取仓库…'),
           React.createElement('button', {
             className: 'gg-btn', type: 'button', disabled: busy || refreshFeedback.state === 'loading', onClick: () => { void load(true) },
           }, refreshButtonLabel(refreshFeedback.state)),
@@ -1373,10 +1715,13 @@ interface SyncTabProps extends RepositoryTabProps {}
         React.createElement('div', { className: 'gg-sync-actions' },
           React.createElement('strong', null, '远程同步'),
           React.createElement('div', { className: 'gg-sync-row' },
-            React.createElement('select', {
-              className: 'gg-input', value: remote, disabled: busy || !hasRemote,
-              onChange: (event: AnyRecord) => setRemote(String(event.target.value || '')),
-            }, state ? state.remotes.map((entry: string) => React.createElement('option', { value: entry, key: entry }, entry)) : null),
+            React.createElement('label', { className: 'gg-field', htmlFor: 'gg-sync-remote' },
+              React.createElement('span', { className: 'gg-field-label' }, '远程仓库'),
+              React.createElement('select', {
+                id: 'gg-sync-remote', className: 'gg-input', value: remote, disabled: busy || !hasRemote,
+                onChange: (event: AnyRecord) => setRemote(String(event.target.value || '')),
+              }, state ? state.remotes.map((entry: string) => React.createElement('option', { value: entry, key: entry }, entry)) : null),
+            ),
             React.createElement('button', { className: 'gg-btn', type: 'button', disabled: busy || !remote, onClick: () => { void run('fetch', { remote }) } }, 'Fetch'),
           ),
           React.createElement('div', { className: 'gg-actions' },
@@ -1400,10 +1745,13 @@ interface SyncTabProps extends RepositoryTabProps {}
           state?.rebaseInProgress ? React.createElement('div', { className: 'gg-sync-warning' }, state.conflictCount > 0
             ? '请先在“变更”页解决并暂存全部冲突，然后返回这里继续 Rebase。'
             : '冲突已经解决并暂存，可以继续 Rebase；也可以中止并恢复到开始前。') : null,
-          !state?.rebaseInProgress ? React.createElement('select', {
-            className: 'gg-input', value: rebaseTarget, disabled: busy || targets.length === 0,
-            onChange: (event: AnyRecord) => setRebaseTarget(String(event.target.value || '')),
-          }, targets.map((entry: string) => React.createElement('option', { value: entry, key: entry }, entry))) : null,
+          !state?.rebaseInProgress ? React.createElement('label', { className: 'gg-field', htmlFor: 'gg-rebase-target' },
+            React.createElement('span', { className: 'gg-field-label' }, '目标引用'),
+            React.createElement('select', {
+              id: 'gg-rebase-target', className: 'gg-input', value: rebaseTarget, disabled: busy || targets.length === 0,
+              onChange: (event: AnyRecord) => setRebaseTarget(String(event.target.value || '')),
+            }, targets.map((entry: string) => React.createElement('option', { value: entry, key: entry }, entry))),
+          ) : null,
           React.createElement('label', { className: 'gg-check' },
             React.createElement('input', {
               type: 'checkbox', checked: riskAccepted, disabled: busy,
@@ -1683,6 +2031,21 @@ interface SyncTabProps extends RepositoryTabProps {}
         { id: 'sync', label: '同步' },
         { id: 'proposal', label: '建议' },
       ]
+      const onTabKeyDown = (event: AnyRecord, index: number) => {
+        let nextIndex = index
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length
+        else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length
+        else if (event.key === 'Home') nextIndex = 0
+        else if (event.key === 'End') nextIndex = tabs.length - 1
+        else return
+        event.preventDefault()
+        const next = tabs[nextIndex]!
+        setTab(next.id)
+        window.requestAnimationFrame(() => {
+          const element = document.getElementById('gg-tab-' + next.id)
+          if (element) element.focus()
+        })
+      }
       const content = tab === 'changes'
         ? React.createElement(GitChangesTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure })
         : tab === 'branches'
@@ -1715,8 +2078,16 @@ interface SyncTabProps extends RepositoryTabProps {}
         style: { [WORKBENCH_TRACK]: workbenchTrackForRatio(ratio) },
       },
         React.createElement('div', {
-          className: 'gg-workbench-resize' + (isResizing ? ' dragging' : ''), 'aria-hidden': 'true',
+          className: 'gg-workbench-resize' + (isResizing ? ' dragging' : ''), role: 'separator', tabIndex: 0,
+          'aria-label': '调整 Git 工作台宽度', 'aria-orientation': 'vertical',
+          'aria-valuemin': Math.round(WORKBENCH_MIN_RATIO * 100), 'aria-valuemax': Math.round(WORKBENCH_MAX_RATIO * 100),
+          'aria-valuenow': Math.round(ratio * 100),
           title: '左右拖动调整工作台宽度', onPointerDown: onResizePointerDown,
+          onKeyDown: (event: AnyRecord) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            setWorkbenchRatio(ratio + (event.key === 'ArrowLeft' ? .02 : -.02), true)
+          },
         }),
         React.createElement('div', { className: 'gg-workbench-head' },
           React.createElement('span', { className: 'gg-workbench-title' }, 'Git 工作台'),
@@ -1725,12 +2096,15 @@ interface SyncTabProps extends RepositoryTabProps {}
           }, '×'),
         ),
         React.createElement('div', { className: 'gg-workbench-body' },
-          React.createElement('div', { className: 'gg-tabs', role: 'tablist', 'aria-label': 'Git 工作台区域' }, tabs.map((entry: AnyRecord) => React.createElement('button', {
+          React.createElement('div', { className: 'gg-tabs', role: 'tablist', 'aria-label': 'Git 工作台区域' }, tabs.map((entry: { id: string; label: string }, index: number) => React.createElement('button', {
             className: 'gg-tab' + (tab === entry.id ? ' active' : ''), type: 'button', role: 'tab',
-            'aria-selected': tab === entry.id, onClick: () => setTab(entry.id), key: entry.id,
+            id: 'gg-tab-' + entry.id, 'aria-controls': 'gg-panel-' + entry.id,
+            'aria-selected': tab === entry.id, tabIndex: tab === entry.id ? 0 : -1,
+            onClick: () => setTab(entry.id), onKeyDown: (event: AnyRecord) => onTabKeyDown(event, index), key: entry.id,
           }, entry.label))),
-          analysisBanner,
-          content,
+          React.createElement('div', {
+            className: 'gg-tab-panel', id: 'gg-panel-' + tab, role: 'tabpanel', 'aria-labelledby': 'gg-tab-' + tab,
+          }, analysisBanner, content),
         ),
         React.createElement('section', { className: 'gg-command-log', 'aria-label': '命令日志' },
           React.createElement('strong', { className: 'gg-command-log-head' }, '命令日志'),
