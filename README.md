@@ -63,6 +63,25 @@ dsh web
 
 Use the Git button beside the composer to inspect changes, review commit history, stage files, commit changes, manage branches, or synchronize with a remote. Rebase and forceful branch deletion require an explicit risk confirmation.
 
+### Conflict resolution
+
+Open **Git workbench → 冲突解决 (Conflict resolution)**, also linked from Changes and Sync:
+
+1. Inspect conflicted files and the active Merge / Rebase / Cherry-pick operation, or start an operation using a branch or commit reference.
+2. Compare the base, current side, incoming side, and editable result. Accept either side per block, keep both with the current side first, edit the result manually, or jump to the next block.
+3. Save the result to the working tree, then mark it resolved to stage it. Remaining conflict markers block resolution; external file or operation changes invalidate the snapshot instead of silently overwriting new content.
+4. Continue after all files are resolved. Further conflicts refresh the list. Explicit confirmation also enables abort, or skipping the current Rebase / Cherry-pick commit, including empty commits.
+
+During Rebase, the current side is the target branch plus replayed commits; the incoming side is the commit being replayed. Delete/modify conflicts offer explicit deletion. Binary and non-UTF-8 conflicts offer whole-side selection. Text editing supports up to 48 KiB per version; use external tools for larger files, symlinks, and submodules, then refresh.
+
+Unsaved edits block tab switching and retain a draft for the current page lifetime. Browser reload warns before losing edits, but drafts do not persist across reloads. Authenticated session actions read the content; file writes and Git commands run through Harness Shell with the session sandbox policy.
+
+After upgrading the local plugin, restart the Harness backend and refresh the browser so both Host and Client load the new build.
+
+Conflict-resolution validation: all 91 tests and 27 reproducible build artifacts passed, covering four-way reads, block choices, save/resolve, successive Rebase conflicts, empty-commit skipping, linked worktrees, stale snapshots, and session isolation. Full Merge, Rebase, and Cherry-pick browser workflows were verified using an isolated temporary Harness instance and real Git repositories, including block choices, manual edits, whole-side selection, saving, resolving, and continuing. Regression coverage also includes valid separator lines, unborn repositories, and special filenames.
+
+
+
 For a more involved workflow, ask the Agent for a Git operation. For example:
 
 ```text
@@ -108,7 +127,7 @@ The plugin registers two model tools:
 | `git_repo_state` | Reads the current repository state without modifying it. |
 | `git_propose` | Validates and registers one or more Git steps. |
 
-The Web profile adds a Git action beside the composer and opens the workbench in the native details area. Its tabs provide visual access to working-tree changes and diffs, branches and references, commit history and details, stashes, remote synchronization, and Agent-generated proposals. Commands are validated both when a proposal is created and immediately before execution. When an action fails, the workbench preserves structured error context and repository diagnostics; recognized failures can create a new recovery proposal, while complex failures can be handed back to the Agent for analysis.
+The Web profile adds a Git action beside the composer and opens the workbench in a native right-sidebar tab. Its tabs provide visual access to working-tree changes and diffs, branches and references, commit history and details, stashes, remote synchronization, and Agent-generated proposals. Commands are validated both when a proposal is created and immediately before execution. When an action fails, the workbench preserves structured error context and repository diagnostics; recognized failures can create a new recovery proposal, while complex failures can be handed back to the Agent for analysis.
 
 ## Security
 
@@ -121,7 +140,19 @@ Please report vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
 ## Compatibility
 
-Last verified on **2026-08-20** with DeepSeek Harness `0.1.0-rc.8` and dsh-easygit-plugin `0.2.3`. Verification covered `npm run check` (68 tests), 24 reproducible build artifacts, a dry-run npm package, a temporary DSH Web-profile composition, and end-to-end Git operations against a temporary local copy of the FastAPI repository. The end-to-end coverage includes repository inspection, diffs, commits, branches, stashes, fetch/pull/push, successful and conflicted Rebases, recovery behavior, and proposal safety checks.
+Last verified on **2026-09-18** with DeepSeek Harness `0.1.6-alpha.2` and dsh-easygit-plugin `0.3.0`, against upstream commit [`ddefc45`](https://github.com/deepseek-ai/deepseek-harness/commit/ddefc45fbc7f8e46dd73185e68295696d1297887). Web startup, native tab registration, and repository inspection were also checked on `0.1.5-rc.2`. The `0.3.x` plugin uses the new sidebar and session APIs and no longer targets `0.1.0-rc.8`.
+
+The adaptation uses native sidebar tabs (DSH owns sizing, splitting, and closing), session-scoped Agent analysis, repository access for sessions without a running Agent and persisted sessions, and DSH Connection browser authentication and origin checks. Persisted sandbox modes are preserved; unknown sessions never fall back to an arbitrary directory.
+
+Validation covered `npm run check` (72 tests and 24 reproducible build artifacts), a dry-run npm package, and browser checks on `0.1.6-alpha.2` for repository inspection, diffs, staging, committing, and native tab operations. Git integration tests use temporary repositories and cover branches, stashes, fetch/pull/push, successful and conflicted Rebases, recovery, and proposal safety. Live model-generated replies were not exercised.
+
+Install the official package matching that source version without building DSH yourself:
+
+```sh
+npm install -g @deepseek-ai/dsh@0.1.6-alpha.2
+```
+
+Back up the DSH installation and Web profile before upgrading, and check other third-party plugins for compatibility. Older plugins may reference removed settings APIs and prevent the entire profile from starting.
 
 ## Development
 
