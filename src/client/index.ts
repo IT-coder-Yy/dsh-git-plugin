@@ -1,3 +1,5 @@
+import { GitConflictsTab } from './conflict-tab'
+import { parseConflictBlocks, chooseConflictBlock } from './conflict-model'
 /**
  * dsh-easygit-plugin Client half as a static Cordis plugin package.
  *
@@ -85,6 +87,7 @@ interface GitDockProps {
 }
 
 interface RepositoryTabProps {
+  onConflicts(): void
   sessionId: string
   intervalFn?: TimerFn | null
   revision: number
@@ -143,6 +146,16 @@ interface SyncTabProps extends RepositoryTabProps {}
       const tag = document.createElement('style')
       tag.id = 'dsh-easygit-plugin-css'
       tag.textContent = `
+        .gg-conflict-files { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+        .gg-conflict-files button { text-align: left; overflow-wrap: anywhere; }
+        .gg-conflict-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+        .gg-conflict-version { min-width: 0; border: 1px solid rgba(127,127,127,.3); border-radius: 6px; padding: 8px; }
+        .gg-conflict-code, .gg-conflict-editor { display: block; box-sizing: border-box; width: 100%; height: 260px; overflow: auto; margin-top: 8px; font: 12px/1.6 monospace; tab-size: 4; white-space: pre; }
+        .gg-conflict-editor { color: inherit; background: var(--gg-surface); border: 1px solid rgba(127,127,127,.4); padding: 8px; resize: vertical; }
+        .gg-conflict-line-number { display: inline-block; min-width: 3em; padding-right: 1em; opacity: .45; user-select: none; text-align: right; }
+        .gg-conflict-block { border-left: 3px solid #d09b38; padding: 10px; margin: 12px 0; background: rgba(127,127,127,.06); }
+        .gg-conflict-block pre { overflow: auto; max-height: 220px; font: 12px/1.6 monospace; }
+        @media (max-width: 700px) { .gg-conflict-grid { grid-template-columns: minmax(0, 1fr); } }
         .gg-dock { margin: 2px 0; padding: 6px 10px; font-size: 13px; line-height: 1.5; color: inherit; }
         .gg-dock-full { border: 1px solid rgba(127,127,127,.35); border-radius: 8px; background: rgba(127,127,127,.06); }
         .gg-idle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -930,7 +943,9 @@ interface SyncTabProps extends RepositoryTabProps {}
       }
 
       const files: RepositoryFile[] = summary && Array.isArray(summary.files) ? summary.files : []
-      const stagedFiles = files.filter((file) => file.indexStatus && file.indexStatus !== ' ' && file.indexStatus !== '?')
+      const isConflict = (file: RepositoryFile) => /^(?:DD|AU|UD|UA|DU|AA|UU)$/.test(file.indexStatus + file.workTreeStatus)
+      const hasConflicts = files.some(isConflict)
+      const stagedFiles = files.filter((file) => !isConflict(file) && file.indexStatus && file.indexStatus !== ' ' && file.indexStatus !== '?')
       const unstagedFiles = files.filter((file) => (file.workTreeStatus && file.workTreeStatus !== ' ') || file.indexStatus === '?')
       const fileRow = (file: RepositoryFile, staged: boolean, key: string, depth: number) => {
         const status = String(file.indexStatus || ' ') + String(file.workTreeStatus || ' ')
@@ -942,8 +957,8 @@ interface SyncTabProps extends RepositoryTabProps {}
         ),
         React.createElement('button', {
           className: 'gg-btn', disabled: busy,
-          onClick: () => runMutation(staged ? 'unstage-paths' : 'stage-paths', { paths: [String(file.path || '')] }),
-        }, staged ? '取消暂存' : '暂存'),
+          onClick: () => isConflict(file) ? props.onConflicts() : runMutation(staged ? 'unstage-paths' : 'stage-paths', { paths: [String(file.path || '')] }),
+        }, isConflict(file) ? '解决冲突' : staged ? '取消暂存' : '暂存'),
         )
       }
 
@@ -981,7 +996,8 @@ interface SyncTabProps extends RepositoryTabProps {}
             className: 'gg-btn', disabled: busy || refreshFeedback.state === 'loading',
             onClick: () => { void load(true) },
           }, refreshButtonLabel(refreshFeedback.state)),
-          React.createElement('button', { className: 'gg-btn', disabled: busy || !summary, onClick: () => runMutation('stage-all') }, '全部暂存'),
+          React.createElement('button', { className: 'gg-btn', type: 'button', onClick: props.onConflicts }, '解决冲突 / Merge / Cherry-pick'),
+          React.createElement('button', { className: 'gg-btn', disabled: busy || !summary || hasConflicts, title: hasConflicts ? '请先解决并标记冲突文件' : undefined, onClick: () => runMutation('stage-all') }, '全部暂存'),
           React.createElement('button', { className: 'gg-btn', disabled: busy || !summary, onClick: () => runMutation('unstage-all') }, '全部取消暂存'),
         ),
         message ? React.createElement('div', { className: 'gg-workbench-error' }, message) : null,
@@ -1005,7 +1021,7 @@ interface SyncTabProps extends RepositoryTabProps {}
                 }),
               ),
               React.createElement('button', {
-                className: 'gg-btn primary', disabled: busy || !commitMessage.trim() || stagedFiles.length === 0,
+                className: 'gg-btn primary', disabled: busy || hasConflicts || !commitMessage.trim() || stagedFiles.length === 0,
                 onClick: () => runMutation('commit', { message: commitMessage }).then((succeeded: boolean) => { if (succeeded) setCommitMessage('') }),
               }, '提交'),
             ),
@@ -1630,11 +1646,15 @@ interface SyncTabProps extends RepositoryTabProps {}
         setDiagnostics('')
         const request = { action, sessionId, operationId: operationId(action), ...payload } as EasyGitRequest<EasyGitAction>
         return (rpc(request) as Promise<AnyRecord>)
-          .then((response) => {
+          .then(async (response) => {
             if (!response || response.ok !== true) {
               if (completeCommand) completeCommand(false)
               setMessage(actionError(response))
               setDiagnostics(actionDiagnostics(response))
+              try {
+                const conflicts = await rpc({ action: 'get-conflicts', sessionId })
+                if (conflicts.ok && conflicts.data.files.length) { props.onConflicts(); onChanged(); return false }
+              } catch { /* Keep the original Git failure visible if the refresh fails. */ }
               onFailure(response)
               void load()
               return false
@@ -1685,6 +1705,7 @@ interface SyncTabProps extends RepositoryTabProps {}
           React.createElement('div', { className: 'gg-sync-card' }, React.createElement('strong', null, '工作区'), React.createElement('span', { className: 'gg-sync-value' }, statusText)),
           React.createElement('div', { className: 'gg-sync-card' }, React.createElement('strong', null, '远程仓库'), React.createElement('span', { className: 'gg-sync-value' }, state.remotes.join('、') || '未配置')),
         ) : null,
+        React.createElement('button', { className: 'gg-btn', type: 'button', onClick: props.onConflicts }, '解决冲突 / Merge / Cherry-pick'),
         !hasRemote && state ? React.createElement('div', { className: 'gg-sync-warning' }, '当前仓库没有远程仓库。请先在终端或后续的 Remote 管理功能中添加远程地址。') : null,
         React.createElement('div', { className: 'gg-sync-actions' },
           React.createElement('strong', null, '远程同步'),
@@ -1717,7 +1738,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         React.createElement('div', { className: 'gg-sync-actions' },
           React.createElement('strong', null, 'Rebase（高风险）'),
           state?.rebaseInProgress ? React.createElement('div', { className: 'gg-sync-warning' }, state.conflictCount > 0
-            ? '请先在“变更”页解决并暂存全部冲突，然后返回这里继续 Rebase。'
+            ? '请到“冲突解决”页处理并标记全部冲突，然后继续 Rebase。'
             : '冲突已经解决并暂存，可以继续 Rebase；也可以中止并恢复到开始前。') : null,
           !state?.rebaseInProgress ? React.createElement('label', { className: 'gg-field', htmlFor: 'gg-rebase-target' },
             React.createElement('span', { className: 'gg-field-label' }, '目标引用'),
@@ -1759,6 +1780,9 @@ interface SyncTabProps extends RepositoryTabProps {}
 
     function GitWorkbenchPanel(props: GitWorkbenchPanelProps) {
       const [tab, setTab] = React.useState('changes')
+      const [conflictDirty, setConflictDirty] = React.useState(false)
+      const conflictDirtyRef = React.useRef(false)
+      conflictDirtyRef.current = conflictDirty
       const [revision, setRevision] = React.useState(0)
       const [commandLogs, setCommandLogs] = React.useState([])
       const [pendingAnalysis, setPendingAnalysis] = React.useState(null as null | {
@@ -1782,7 +1806,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         return () => window.clearTimeout(timer)
       }
       const handleFailure: FailureHandler = (response) => {
-        const scheduled = openRecoveryProposal(response, () => setTab('proposal'), (open, delayMs) => {
+        const scheduled = openRecoveryProposal(response, () => { if (!conflictDirtyRef.current) setTab('proposal') }, (open, delayMs) => {
           let dispose: Dispose = () => {}
           dispose = schedule(() => {
             delayedOpenDisposers.current = delayedOpenDisposers.current.filter((item: Dispose) => item !== dispose)
@@ -1855,7 +1879,7 @@ interface SyncTabProps extends RepositoryTabProps {}
               const proposal = response && response.ok === true ? response.proposal : null
               const transition = pendingProposalTransition(observedProposalIdRef.current, proposal)
               observedProposalIdRef.current = transition.proposalId
-              if (transition.shouldOpen) {
+              if (transition.shouldOpen && !conflictDirtyRef.current) {
                 setPendingAnalysis(null)
                 setTab('proposal')
                 return
@@ -1897,6 +1921,7 @@ interface SyncTabProps extends RepositoryTabProps {}
       }, [commandLogs])
       const tabs = [
         { id: 'changes', label: '变更' },
+        { id: 'conflicts', label: '冲突解决' },
         { id: 'branches', label: '分支' },
         { id: 'commits', label: '提交记录' },
         { id: 'stashes', label: '贮藏' },
@@ -1904,6 +1929,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         { id: 'proposal', label: '建议' },
       ]
       const onTabKeyDown = (event: AnyRecord, index: number) => {
+        if (conflictDirty) return
         let nextIndex = index
         if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length
         else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length
@@ -1919,7 +1945,9 @@ interface SyncTabProps extends RepositoryTabProps {}
         })
       }
       const content = tab === 'changes'
-        ? React.createElement(GitChangesTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure })
+        ? React.createElement(GitChangesTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure, onConflicts: () => setTab('conflicts') })
+        : tab === 'conflicts'
+          ? React.createElement(GitConflictsTab, { key: props.sessionId, sessionId: props.sessionId, revision, rpc, onChanged: refresh, onDirty: setConflictDirty, onCommand: reportCommand })
         : tab === 'branches'
           ? React.createElement(GitBranchesTab, { sessionId: props.sessionId, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure })
           : tab === 'commits'
@@ -1927,7 +1955,7 @@ interface SyncTabProps extends RepositoryTabProps {}
             : tab === 'stashes'
               ? React.createElement(GitStashesTab, { sessionId: props.sessionId, revision })
               : tab === 'sync'
-                ? React.createElement(GitSyncTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure })
+                ? React.createElement(GitSyncTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure, onConflicts: () => setTab('conflicts') })
                 : React.createElement(GitDock, { sessionId: props.sessionId, intervalFn: props.intervalFn, timeoutFn: props.timeoutFn, onFailure: handleFailure })
       const analysisBanner = shouldShowAnalysisBanner(tab, pendingAnalysis) && pendingAnalysis ? React.createElement('div', { className: 'gg-analysis' },
         React.createElement('strong', null, pendingAnalysis.status === 'waiting' ? 'Agent 正在分析 Git 失败…' : '这个 Git 失败需要 Agent 分析'),
@@ -1959,7 +1987,7 @@ interface SyncTabProps extends RepositoryTabProps {}
             className: 'gg-tab' + (tab === entry.id ? ' active' : ''), type: 'button', role: 'tab',
             id: 'gg-tab-' + entry.id, 'aria-controls': 'gg-panel-' + entry.id,
             'aria-selected': tab === entry.id, tabIndex: tab === entry.id ? 0 : -1,
-            onClick: () => setTab(entry.id), onKeyDown: (event: AnyRecord) => onTabKeyDown(event, index), key: entry.id,
+            disabled: conflictDirty && tab !== entry.id, onClick: () => setTab(entry.id), onKeyDown: (event: AnyRecord) => onTabKeyDown(event, index), key: entry.id,
           }, entry.label))),
           React.createElement('div', {
             className: 'gg-tab-panel', id: 'gg-panel-' + tab, role: 'tabpanel', 'aria-labelledby': 'gg-tab-' + tab,
@@ -2308,7 +2336,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
-        registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
+        GitConflictsTab, parseConflictBlocks, chooseConflictBlock, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
         deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
         refreshButtonLabel, recoveryProposalId, openRecoveryProposal, analysisProposalId, failureContext, buildAgentRepairPrompt,
         shouldShowAnalysisBanner, canDismissFailedProposal, pendingProposalTransition,

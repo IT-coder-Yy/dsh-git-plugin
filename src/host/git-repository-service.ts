@@ -1,3 +1,4 @@
+import { conflictWorkerCommand } from './conflict-worker'
 import type {
   ActionErrorCode,
   ActionFailureReason,
@@ -85,15 +86,18 @@ function mutationErrorCode(result: GitRunResult): ActionErrorCode {
 
 function parseStatus(status: string): RepositoryFile[] {
   const files: RepositoryFile[] = []
-  for (const line of status.split('\n')) {
-    if (!line || line.startsWith('## ') || line.length < 4) continue
-    const indexStatus = line[0] ?? ' '
-    const workTreeStatus = line[1] ?? ' '
-    const rawPath = line.slice(3)
-    const renameAt = rawPath.indexOf(' -> ')
-    files.push(renameAt >= 0
-      ? { indexStatus, workTreeStatus, path: rawPath.slice(renameAt + 4), originalPath: rawPath.slice(0, renameAt) }
-      : { indexStatus, workTreeStatus, path: rawPath })
+  const records = status.split('\0')
+  // Only consume complete records; Git's -z format never quotes filenames.
+  for (let index = 0; index < records.length - 1; index++) {
+    const record = records[index]!
+    if (record.startsWith('## ') || record.length < 4) continue
+    const indexStatus = record[0]!
+    const workTreeStatus = record[1]!
+    const path = record.slice(3)
+    if (/[RC]/.test(indexStatus + workTreeStatus)) {
+      if (index + 1 >= records.length - 1) break
+      files.push({ indexStatus, workTreeStatus, path, originalPath: records[++index]! })
+    } else files.push({ indexStatus, workTreeStatus, path })
   }
   return files
 }
@@ -171,8 +175,10 @@ function parseCommitFiles(nameStatus: string, numstat: string): { files: CommitF
   }
 }
 
+const repositoryLocks = new Map<string, Promise<void>>()
+
 export class GitRepositoryService {
-  private readonly locks = new Map<string, Promise<void>>()
+  private readonly locks = repositoryLocks
   private readonly operations = new Map<string, { createdAt: number; result: Promise<ActionResult<unknown>> }>()
 
   constructor(private readonly shell: ShellService | undefined) {}
@@ -202,13 +208,14 @@ export class GitRepositoryService {
     const [branchResult, headResult, statusResult] = await Promise.all([
       this.run(workdir, 'git branch --show-current', 15_000, 4096, signal, sandboxPolicy),
       this.run(workdir, 'git rev-parse --short HEAD', 15_000, 4096, signal, sandboxPolicy),
-      this.run(workdir, 'git status --porcelain=v1 --branch --untracked-files=all', 15_000, 50_000, signal, sandboxPolicy),
+      this.run(workdir, 'git status --porcelain=v1 --branch --untracked-files=all -z', 15_000, 50_000, signal, sandboxPolicy),
     ])
     if (branchResult.exitCode !== 0 || headResult.exitCode !== 0 || statusResult.exitCode !== 0) {
       return errorResult('GIT_FAILED', '无法读取 Git 仓库摘要', redactAndLimit(outputOf(branchResult) + '\n' + outputOf(headResult) + '\n' + outputOf(statusResult), 8192))
     }
-    const status = redactAndLimit(statusResult.stdout?.text ?? '', 50_000)
-    const files = parseStatus(status)
+    const rawStatus = statusResult.stdout?.text ?? ''
+    const files = parseStatus(rawStatus)
+    const status = redactAndLimit(rawStatus.replace(/\0/g, '\n'), 50_000)
     return {
       ok: true,
       data: {
@@ -617,6 +624,37 @@ export class GitRepositoryService {
     requiresStagedContent: boolean,
     readResult: () => Promise<ActionResult<T>>,
   ): Promise<ActionResult<T>> {
+    return this.withMutation(request, async () => {
+      if (requiresStagedContent) {
+        const staged = await this.run(request.workdir, 'git diff --cached --quiet', 15_000, 4096, request.signal, request.sandboxPolicy)
+        if (staged.exitCode === 0) return errorResult<T>('STATE_CONFLICT', '没有已暂存的改动，无法提交')
+        if (staged.exitCode !== 1) return errorResult<T>('GIT_FAILED', '无法检查暂存区', redactAndLimit(outputOf(staged), 8192))
+      }
+      const executed = await this.run(request.workdir, command, 120_000, MUTATION_OUTPUT_MAX_CHARS, request.signal, request.sandboxPolicy)
+      if (executed.exitCode !== 0) return errorResult<T>(mutationErrorCode(executed), failureMessage, redactAndLimit(outputOf(executed), 8192))
+      const result = await readResult()
+      return result.ok ? { ...result, operationId: String(request.operationId) } : result
+    })
+  }
+
+  async conflictAction(action: string, workdir: string, payload: Record<string, unknown>, request?: MutationRequest, sandboxPolicy?: unknown): Promise<ActionResult<unknown>> {
+    if (action === 'save-conflict' && (typeof payload.content !== 'string' || Buffer.byteLength(payload.content) > 48 * 1024)) {
+      return errorResult('INVALID_ARGUMENT', '结果必须是 48 KiB 以内的文本')
+    }
+    const run = async (): Promise<ActionResult<unknown>> => {
+      const result = await this.run(workdir, conflictWorkerCommand(action, payload), 120_000, 2 * 1024 * 1024, request?.signal, request?.sandboxPolicy ?? sandboxPolicy)
+      if (result.exitCode !== 0) return errorResult(mutationErrorCode(result), '冲突操作失败', redactAndLimit(outputOf(result), 8192))
+      try {
+        const response = JSON.parse(result.stdout?.text ?? '') as ActionResult<unknown>
+        if (!response.ok && response.diagnostics) response.diagnostics = redactAndLimit(response.diagnostics, 8192)
+        if (!response.ok) response.message = redactAndLimit(response.message, 8192)
+        return response
+      } catch { return errorResult('GIT_FAILED', '无法读取完整的冲突数据') }
+    }
+    return request ? this.withMutation(request, run) : run()
+  }
+
+  private async withMutation<T>(request: MutationRequest, task: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
     if (!request.sessionId || !request.workdir) return errorResult('SESSION_NOT_FOUND', '无法确定当前会话的仓库目录')
     if (typeof request.operationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(request.operationId)) {
       return errorResult('INVALID_ARGUMENT', 'operationId 必须是 1–128 个安全字符')
@@ -628,7 +666,7 @@ export class GitRepositoryService {
     const existing = this.operations.get(key)
     if (existing) return existing.result as Promise<ActionResult<T>>
 
-    const lockKey = request.sessionId + '\u0000' + repository.data.topLevel
+    const lockKey = repository.data.topLevel
     const previous = this.locks.get(lockKey) ?? Promise.resolve()
     let release: () => void = () => {}
     const current = new Promise<void>((resolve) => { release = resolve })
@@ -636,15 +674,7 @@ export class GitRepositoryService {
     this.locks.set(lockKey, queued)
     const result = previous.then(async () => {
       try {
-        if (requiresStagedContent) {
-          const staged = await this.run(request.workdir, 'git diff --cached --quiet', 15_000, 4096, request.signal, request.sandboxPolicy)
-          if (staged.exitCode === 0) return errorResult<T>('STATE_CONFLICT', '没有已暂存的改动，无法提交')
-          if (staged.exitCode !== 1) return errorResult<T>('GIT_FAILED', '无法检查暂存区', redactAndLimit(outputOf(staged), 8192))
-        }
-        const executed = await this.run(request.workdir, command, 120_000, MUTATION_OUTPUT_MAX_CHARS, request.signal, request.sandboxPolicy)
-        if (executed.exitCode !== 0) return errorResult<T>(mutationErrorCode(executed), failureMessage, redactAndLimit(outputOf(executed), 8192))
-        const result = await readResult()
-        return result.ok ? { ...result, operationId: String(request.operationId) } : result
+        return await task()
       } finally {
         release()
         if (this.locks.get(lockKey) === queued) this.locks.delete(lockKey)

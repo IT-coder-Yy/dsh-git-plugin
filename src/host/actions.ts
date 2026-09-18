@@ -59,6 +59,12 @@ interface EasyGitActionDependencies {
 }
 
 const REPOSITORY_ACTIONS = [
+  'get-conflicts',
+  'get-conflict',
+  'save-conflict',
+  'resolve-conflict',
+  'start-operation',
+  'finish-operation',
   'get-summary',
   'get-diff',
   'get-branches',
@@ -201,6 +207,10 @@ async function dispatchRepositoryAction(
   if (!context) return { ok: false, code: 'SESSION_NOT_FOUND', message: '无法确定当前会话的仓库目录' }
   const repository = dependencies.repository
   const base = { sessionId, workdir: context.workdir, operationId: body.operationId, sandboxPolicy: context.policy }
+  if (action === 'get-conflicts' || action === 'get-conflict') return repository.conflictAction(action, context.workdir, body, undefined, context.policy)
+  if (action === 'save-conflict' || action === 'resolve-conflict' || action === 'start-operation' || action === 'finish-operation') {
+    return repository.conflictAction(action, context.workdir, body, base)
+  }
   if (action === 'get-summary') return repository.getSummary(context.workdir, undefined, context.policy)
   if (action === 'get-diff') return repository.getDiff(context.workdir, body.path, body.staged === true, undefined, context.policy)
   if (action === 'get-branches') return repository.getBranches(context.workdir, undefined, context.policy)

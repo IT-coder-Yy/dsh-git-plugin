@@ -58,5 +58,7 @@ export declare class GitRepositoryService {
     private mutate;
     private mutateSync;
     private mutateAndRead;
+    conflictAction(action: string, workdir: string, payload: Record<string, unknown>, request?: MutationRequest, sandboxPolicy?: unknown): Promise<ActionResult<unknown>>;
+    private withMutation;
     private pruneOperations;
 }

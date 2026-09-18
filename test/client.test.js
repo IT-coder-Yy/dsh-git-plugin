@@ -3,9 +3,9 @@
 const { test } = require('node:test')
 const assert = require('node:assert')
 
-function loadClientPlugin() {
+function loadClientPlugin(reactOverrides = {}) {
   let clientPlugin
-  const react = { createElement: (...args) => ({ args }) }
+  const react = { createElement: (...args) => ({ args }), ...reactOverrides }
   global.window = {
     __ModuleLoader__: {
       load(definition) {
@@ -449,4 +449,98 @@ test('手动刷新按钮明确展示进行中、成功和失败状态', () => {
   assert.strictEqual(label('loading'), '正在刷新…')
   assert.strictEqual(label('succeeded'), '已刷新')
   assert.strictEqual(label('failed'), '刷新失败')
+})
+
+test('逐块选择保留 CRLF、非冲突内容、diff3 基础段及文件末尾', () => {
+  const { parseConflictBlocks, chooseConflictBlock } = loadClientPlugin().__testing
+  const text = 'before\r\n<<<<<<< HEAD\r\nours\r\n||||||| base\r\nbase\r\n=======\r\ntheirs\r\n>>>>>>> other\r\nafter'
+  const [block] = parseConflictBlocks(text)
+  assert.strictEqual(block.base, 'base\r\n')
+  assert.strictEqual(chooseConflictBlock(text, block, 'ours'), 'before\r\nours\r\nafter')
+  assert.strictEqual(chooseConflictBlock(text, block, 'theirs'), 'before\r\ntheirs\r\nafter')
+  assert.strictEqual(chooseConflictBlock(text, block, 'both'), 'before\r\nours\r\ntheirs\r\nafter')
+  assert.deepStrictEqual(parseConflictBlocks('<<<<<<< HEAD\nincomplete'), [])
+  const custom = '<<<<<<<<<< HEAD\na\n==========\nb\n>>>>>>>>>> other'
+  assert.strictEqual(parseConflictBlocks(custom, 10).length, 1)
+  assert.strictEqual(parseConflictBlocks(custom).length, 0)
+  const multiple = custom + '\n' + custom
+  const remaining = chooseConflictBlock(multiple, parseConflictBlocks(multiple, 10)[0], 'theirs')
+  assert.strictEqual(parseConflictBlocks(remaining, 10).length, 1)
+})
+
+test('冲突界面按块选择、保存后才标记解决，携带最新快照', async () => {
+  const slots = []
+  let cursor = 0
+  const pending = []
+  let tree
+  const component = loadClientPlugin({
+    useState(initial) {
+      const index = cursor++
+      if (!(index in slots)) slots[index] = initial
+      return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value }]
+    },
+    useRef(initial) {
+      const index = cursor++
+      if (!(index in slots)) slots[index] = { current: initial }
+      return slots[index]
+    },
+    useEffect(effect, deps) {
+      const index = cursor++
+      const previous = slots[index]
+      if (!previous || deps.some((value, i) => !Object.is(value, previous.deps[i]))) {
+        pending.push(() => { previous?.cleanup?.(); slots[index] = { deps, cleanup: effect() } })
+      }
+    },
+  }).__testing.GitConflictsTab
+  const original = 'before\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> incoming\nafter\n'
+  const version = text => ({ exists: true, text, mode: '100644', reason: null })
+  const detail = { path: 'a.txt', operation: 'merge', token: 'initial', base: version('base\n'), ours: version('ours\n'), theirs: version('theirs\n'), result: version(original), editable: true, special: false, markerSize: 7 }
+  const state = { operation: 'merge', operationToken: 'op', files: [{ path: 'a.txt', kind: '双方修改', stages: [1, 2, 3] }] }
+  const requests = []
+  let dirty = false
+  const props = {
+    sessionId: 'ui-conflict-test', revision: 0, onChanged() {}, onDirty(value) { dirty = value }, onCommand() { return () => {} },
+    async rpc(request) {
+      requests.push(request)
+      if (request.action === 'get-conflicts') return { ok: true, data: state }
+      if (request.action === 'get-conflict') return { ok: true, data: detail }
+      if (request.action === 'save-conflict') return { ok: true, data: { ...detail, token: 'saved', result: version(request.content) } }
+      if (request.action === 'resolve-conflict') return { ok: true, data: { ...state, files: [] } }
+      throw new Error('Unexpected ' + request.action)
+    },
+  }
+  const render = async () => {
+    cursor = 0; tree = component(props)
+    while (pending.length) pending.shift()()
+    await new Promise(resolve => setImmediate(resolve))
+  }
+  const nodes = value => !value ? [] : Array.isArray(value) ? value.flatMap(nodes) : value.args ? [value, ...value.args.slice(2).flatMap(nodes)] : []
+  const button = caption => nodes(tree).find(node => node.args[0] === 'button' && node.args[2] === caption)
+  global.window = { addEventListener() {}, removeEventListener() {}, confirm: () => true }
+  try {
+    await render(); await render()
+    button('a.txt · 双方修改').args[1].onClick()
+    await render(); await render()
+    assert.equal(button('标记解决').args[1].disabled, true)
+    button('采用当前方').args[1].onClick()
+    await render(); await render()
+    assert.equal(dirty, true)
+    assert.equal(button('标记解决').args[1].disabled, true)
+    button('保存结果').args[1].onClick()
+    await render(); await render()
+    assert.equal(dirty, false)
+    const saved = requests.find(request => request.action === 'save-conflict')
+    assert.equal(saved.content, 'before\nours\nafter\n')
+    assert.equal(saved.token, 'initial')
+    assert.equal(button('标记解决').args[1].disabled, false)
+    button('标记解决').args[1].onClick()
+    await render(); await render()
+    const resolved = requests.find(request => request.action === 'resolve-conflict')
+    assert.equal(resolved.token, 'saved')
+    assert.equal(resolved.choice, 'result')
+    assert.equal(button('继续 Merge').args[1].disabled, true, '继续操作还需要明确风险确认')
+  } finally {
+    for (const slot of slots) slot?.cleanup?.()
+    delete global.window
+  }
 })

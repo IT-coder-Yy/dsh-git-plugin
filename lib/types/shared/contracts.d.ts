@@ -65,6 +65,35 @@ export interface SyncState {
     rebaseInProgress: boolean;
     files: RepositoryFile[];
 }
+export type ConflictOperation = 'merge' | 'rebase' | 'cherry-pick';
+export interface ConflictFile {
+    path: string;
+    kind: string;
+    stages: number[];
+}
+export interface ConflictState {
+    operation: ConflictOperation | null;
+    operationToken: string;
+    files: ConflictFile[];
+}
+export interface ConflictVersion {
+    exists: boolean;
+    text: string | null;
+    mode: string | null;
+    reason: string | null;
+}
+export interface ConflictDetail {
+    path: string;
+    operation: ConflictOperation | null;
+    token: string;
+    base: ConflictVersion;
+    ours: ConflictVersion;
+    theirs: ConflictVersion;
+    result: ConflictVersion;
+    editable: boolean;
+    special: boolean;
+    markerSize: number;
+}
 export interface BranchSummary {
     name: string;
     current: boolean;
@@ -203,6 +232,42 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
     analysis?: AgentAnalysisRequest;
 }
 export interface EasyGitRequestMap {
+    'get-conflicts': {
+        sessionId: string;
+    };
+    'get-conflict': {
+        sessionId: string;
+        path: string;
+    };
+    'save-conflict': {
+        sessionId: string;
+        operationId: string;
+        path: string;
+        token: string;
+        content: string;
+    };
+    'resolve-conflict': {
+        sessionId: string;
+        operationId: string;
+        path: string;
+        token: string;
+        choice: 'result' | 'ours' | 'theirs' | 'delete';
+    };
+    'start-operation': {
+        sessionId: string;
+        operationId: string;
+        kind: ConflictOperation;
+        target: string;
+        confirmRisk: boolean;
+    };
+    'finish-operation': {
+        sessionId: string;
+        operationId: string;
+        kind: ConflictOperation;
+        token: string;
+        mode: 'continue' | 'abort' | 'skip';
+        confirmRisk: boolean;
+    };
     'get-summary': {
         sessionId: string;
     };
@@ -333,6 +398,12 @@ export interface EasyGitRequestMap {
     };
 }
 export interface EasyGitResponseMap {
+    'get-conflicts': ActionResult<ConflictState>;
+    'get-conflict': ActionResult<ConflictDetail>;
+    'save-conflict': ActionResult<ConflictDetail>;
+    'resolve-conflict': ActionResult<ConflictState>;
+    'start-operation': ActionResult<ConflictState>;
+    'finish-operation': ActionResult<ConflictState>;
     'get-summary': ActionResult<RepositorySummary>;
     'get-diff': ActionResult<DiffResult>;
     'get-branches': ActionResult<RepositoryReferences>;

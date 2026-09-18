@@ -1,3 +1,5 @@
+import { GitConflictsTab } from './conflict-tab';
+import { parseConflictBlocks, chooseConflictBlock } from './conflict-model';
 import { registerWorkbench, requestAgentAnalysis } from './panel-controller';
 import { appendCommandLog, analysisProposalId, beginTrackedRequest, buildAgentRepairPrompt, canDismissFailedProposal, buildFileTree, cancelTrackedRequest, commitFileTone, deriveCommitGraph, filterLocalBranches, failureContext, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, openRecoveryProposal, parseReviewRows, pendingProposalTransition, recoveryProposalId, repositoryName, shouldShowAnalysisBanner, type AnyRecord } from './view-model';
 type RefreshState = 'idle' | 'loading' | 'succeeded' | 'failed';
@@ -9,6 +11,9 @@ declare const plugin: {
     inject: string[];
     apply(ctx: AnyRecord): void;
     __testing: {
+        GitConflictsTab: typeof GitConflictsTab;
+        parseConflictBlocks: typeof parseConflictBlocks;
+        chooseConflictBlock: typeof chooseConflictBlock;
         registerWorkbench: typeof registerWorkbench;
         requestAgentAnalysis: typeof requestAgentAnalysis;
         buildFileTree: typeof buildFileTree;
