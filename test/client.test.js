@@ -468,7 +468,17 @@ test('逐块选择保留 CRLF、非冲突内容、diff3 基础段及文件末尾
   assert.strictEqual(parseConflictBlocks(remaining, 10).length, 1)
 })
 
-test('冲突界面按块选择、保存后才标记解决，携带最新快照', async () => {
+test('冲突行范围包含标记，兼容 CRLF、多块、空行及缺失末尾换行', () => {
+  const { parseConflictBlocks, conflictLineRanges, chooseConflictBlock } = loadClientPlugin().__testing
+  const block = '<<<<<<< HEAD\r\nours\r\n||||||| base\r\nbase\r\n=======\r\n\r\n>>>>>>> other'
+  const text = 'before\r\n' + block + '\r\nbetween\r\n' + block
+  assert.deepStrictEqual(conflictLineRanges(text, parseConflictBlocks(text)), [{ start: 2, end: 8 }, { start: 10, end: 16 }])
+  const resolved = chooseConflictBlock(text, parseConflictBlocks(text)[0], 'ours')
+  assert.deepStrictEqual(conflictLineRanges(resolved, parseConflictBlocks(resolved)), [{ start: 4, end: 10 }])
+  assert.deepStrictEqual(conflictLineRanges('', parseConflictBlocks('')), [])
+})
+
+test('三方冲突界面显示来源和行号，按块选择、保存后才标记解决', async () => {
   const slots = []
   let cursor = 0
   const pending = []
@@ -495,6 +505,8 @@ test('冲突界面按块选择、保存后才标记解决，携带最新快照',
   const original = 'before\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> incoming\nafter\n'
   const version = text => ({ exists: true, text, mode: '100644', reason: null })
   const detail = { path: 'a.txt', operation: 'merge', token: 'initial', base: version('base\n'), ours: version('ours\n'), theirs: version('theirs\n'), result: version(original), editable: true, special: false, markerSize: 7 }
+  detail.ours.source = 'HEAD · 0123456789ab'
+  detail.theirs.source = 'MERGE_HEAD · abcdef012345'
   const state = { operation: 'merge', operationToken: 'op', files: [{ path: 'a.txt', kind: '双方修改', stages: [1, 2, 3] }] }
   const requests = []
   let dirty = false
@@ -521,10 +533,25 @@ test('冲突界面按块选择、保存后才标记解决，携带最新快照',
     await render(); await render()
     button('a.txt · 双方修改').args[1].onClick()
     await render(); await render()
+    assert.equal(nodes(tree).filter(node => node.args[1]?.className === 'gg-conflict-version').length, 3)
+    assert.ok(!nodes(tree).some(node => node.args[0] === 'strong' && node.args[2] === '基础版本'))
+    assert.ok(nodes(tree).some(node => node.args[2] === detail.theirs.source))
+    assert.ok(nodes(tree).some(node => node.args[2] === '冲突块 1 · 结果第 2–6 行（5 行，含冲突标记）'))
+    const gutter = () => nodes(tree).find(node => node.args[1]?.className === 'gg-conflict-gutter')
+    const lineNumbers = () => nodes(gutter()).filter(node => node.args[0] === 'span')
+    assert.deepStrictEqual(lineNumbers().map(node => node.args[2]), [1, 2, 3, 4, 5, 6, 7, 8])
+    assert.equal(lineNumbers().filter(node => node.args[1].className.includes('unresolved')).length, 5)
+    const editor = nodes(tree).find(node => node.args[0] === 'textarea')
+    assert.equal(editor.args[1].wrap, 'off')
+    gutter().args[1].ref.current = { scrollTop: 0 }
+    editor.args[1].onScroll({ currentTarget: { scrollTop: 120 } })
+    assert.equal(gutter().args[1].ref.current.scrollTop, 120)
     assert.equal(button('标记解决').args[1].disabled, true)
     button('采用当前方').args[1].onClick()
     await render(); await render()
     assert.equal(dirty, true)
+    assert.deepStrictEqual(lineNumbers().map(node => node.args[2]), [1, 2, 3, 4])
+    assert.equal(lineNumbers().filter(node => node.args[1].className.includes('unresolved')).length, 0)
     assert.equal(button('标记解决').args[1].disabled, true)
     button('保存结果').args[1].onClick()
     await render(); await render()

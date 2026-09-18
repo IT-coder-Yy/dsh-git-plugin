@@ -37,6 +37,9 @@ for (const kind of ['merge', 'rebase', 'cherry-pick']) test(kind + '：读取四
     assert.equal(detail.data.base.text, 'base\n')
     assert.equal(detail.data.ours.text, kind === 'rebase' ? 'theirs\n' : 'ours\n')
     assert.equal(detail.data.theirs.text, kind === 'rebase' ? 'ours\n' : 'theirs\n')
+    const incomingRef = kind === 'merge' ? 'MERGE_HEAD' : kind === 'rebase' ? 'REBASE_HEAD' : 'CHERRY_PICK_HEAD'
+    assert.equal(detail.data.ours.source, 'HEAD · ' + f.git('rev-parse', 'HEAD').slice(0, 12))
+    assert.equal(detail.data.theirs.source, incomingRef + ' · ' + f.git('rev-parse', incomingRef).slice(0, 12))
     const blocked = await f.call('resolve-conflict', { path: file, token: detail.data.token, choice: 'result' })
     assert.equal(blocked.ok, false); assert.match(blocked.message, /冲突标记/)
     const continuedTooSoon = await f.call('finish-operation', { kind, token: start.data.operationToken, mode: 'continue', confirmRisk: true })

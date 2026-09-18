@@ -1,5 +1,5 @@
 import { GitConflictsTab } from './conflict-tab'
-import { parseConflictBlocks, chooseConflictBlock } from './conflict-model'
+import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model'
 /**
  * dsh-easygit-plugin Client half as a static Cordis plugin package.
  *
@@ -148,14 +148,22 @@ interface SyncTabProps extends RepositoryTabProps {}
       tag.textContent = `
         .gg-conflict-files { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
         .gg-conflict-files button { text-align: left; overflow-wrap: anywhere; }
-        .gg-conflict-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+        .gg-conflict-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; overflow-x: auto; }
         .gg-conflict-version { min-width: 0; border: 1px solid rgba(127,127,127,.3); border-radius: 6px; padding: 8px; }
-        .gg-conflict-code, .gg-conflict-editor { display: block; box-sizing: border-box; width: 100%; height: 260px; overflow: auto; margin-top: 8px; font: 12px/1.6 monospace; tab-size: 4; white-space: pre; }
-        .gg-conflict-editor { color: inherit; background: var(--gg-surface); border: 1px solid rgba(127,127,127,.4); padding: 8px; resize: vertical; }
-        .gg-conflict-line-number { display: inline-block; min-width: 3em; padding-right: 1em; opacity: .45; user-select: none; text-align: right; }
+        .gg-conflict-version > strong { display: block; min-height: 40px; line-height: 20px; }
+        .gg-conflict-source { min-height: 32px; margin-top: 4px; font-size: 11px; line-height: 16px; color: var(--gg-text-muted); overflow-wrap: anywhere; }
+        .gg-conflict-code, .gg-conflict-editor, .gg-conflict-gutter { box-sizing: border-box; margin: 0; font: 12px/20px monospace; tab-size: 4; white-space: pre; }
+        .gg-conflict-code { height: 260px; overflow: auto; padding: 8px 0; border: 1px solid transparent; background: var(--gg-surface-inset); }
+        .gg-conflict-line { display: block; width: max-content; min-width: 100%; }
+        .gg-conflict-edit-surface { display: flex; height: 260px; border: 1px solid rgba(127,127,127,.4); background: var(--gg-surface-inset); }
+        .gg-conflict-editor { display: block; min-width: 0; width: 100%; height: 100%; overflow: auto; color: inherit; background: transparent; border: 0; padding: 8px; resize: none; }
+        .gg-conflict-line-number { display: inline-block; box-sizing: border-box; min-width: 4em; padding: 0 .75em; color: var(--gg-text-muted); user-select: none; text-align: right; }
+        .gg-conflict-gutter { flex: none; height: 100%; overflow: hidden; padding: 8px 0 28px; border-right: 1px solid rgba(127,127,127,.2); }
+        .gg-conflict-gutter .gg-conflict-line-number { display: block; height: 20px; }
+        .gg-conflict-line-number.unresolved { color: var(--gg-warning-label); background: color-mix(in srgb, var(--gg-warning) 22%, transparent); box-shadow: inset 3px 0 var(--gg-warning); }
         .gg-conflict-block { border-left: 3px solid #d09b38; padding: 10px; margin: 12px 0; background: rgba(127,127,127,.06); }
-        .gg-conflict-block pre { overflow: auto; max-height: 220px; font: 12px/1.6 monospace; }
-        @media (max-width: 700px) { .gg-conflict-grid { grid-template-columns: minmax(0, 1fr); } }
+        .gg-conflict-block-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .gg-conflict-block pre { overflow: auto; max-height: 220px; padding: 8px; font: 12px/20px monospace; }
         .gg-dock { margin: 2px 0; padding: 6px 10px; font-size: 13px; line-height: 1.5; color: inherit; }
         .gg-dock-full { border: 1px solid rgba(127,127,127,.35); border-radius: 8px; background: rgba(127,127,127,.06); }
         .gg-idle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -2336,7 +2344,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
-        GitConflictsTab, parseConflictBlocks, chooseConflictBlock, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
+        GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
         deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
         refreshButtonLabel, recoveryProposalId, openRecoveryProposal, analysisProposalId, failureContext, buildAgentRepairPrompt,
         shouldShowAnalysisBanner, canDismissFailedProposal, pendingProposalTransition,

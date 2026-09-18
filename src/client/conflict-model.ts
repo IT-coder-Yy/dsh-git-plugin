@@ -6,6 +6,14 @@ export interface ConflictBlock {
   theirs: string
 }
 
+/** Result coordinates include marker lines, and update with the editor text. */
+export function conflictLineRanges(text: string, blocks: ConflictBlock[]) {
+  return blocks.map(block => ({
+    start: text.slice(0, block.start).split('\n').length,
+    end: text.slice(0, block.end).replace(/\n$/, '').split('\n').length,
+  }))
+}
+
 /** Keep byte-for-byte text boundaries, including CRLF and a missing final newline. */
 export function parseConflictBlocks(text: string, markerSize = 7): ConflictBlock[] {
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? []

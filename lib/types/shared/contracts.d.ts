@@ -81,6 +81,7 @@ export interface ConflictVersion {
     text: string | null;
     mode: string | null;
     reason: string | null;
+    source?: string;
 }
 export interface ConflictDetail {
     path: string;

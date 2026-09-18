@@ -1,6 +1,6 @@
 const React = require('react') as typeof import('react')
 import type { ActionResult, ConflictDetail, ConflictOperation, ConflictState, ConflictVersion, EasyGitAction, EasyGitRequest, EasyGitResponse } from '../shared/contracts'
-import { chooseConflictBlock, parseConflictBlocks } from './conflict-model'
+import { chooseConflictBlock, conflictLineRanges, parseConflictBlocks } from './conflict-model'
 
 interface Props {
   sessionId: string
@@ -27,11 +27,13 @@ export function GitConflictsTab(props: Props) {
   const sequence = React.useRef(0)
   const mounted = React.useRef(true)
   const editor = React.useRef<HTMLTextAreaElement>(null)
+  const gutter = React.useRef<HTMLDivElement>(null)
   const nextBlock = React.useRef(0)
   const requestRef = React.useRef<AbortController | null>(null)
   const dirty = !!detail && text !== (detail.result.text ?? '')
   const draftKey = (path: string) => props.sessionId + '\0' + path
   const blocks = parseConflictBlocks(text, detail?.markerSize)
+  const ranges = conflictLineRanges(text, blocks)
 
   React.useEffect(() => {
     props.onDirty(dirty)
@@ -112,8 +114,9 @@ export function GitConflictsTab(props: Props) {
   }
   const button = (caption: string, action: () => void, disabled = false, primary = false) => h('button', { type: 'button', className: 'gg-btn' + (primary ? ' primary' : ''), disabled: busy || disabled, onClick: action }, caption)
   const version = (title: string, value: ConflictVersion) => h('section', { className: 'gg-conflict-version', key: title },
-    h('strong', null, title), value.reason ? h('p', null, value.reason) : !value.exists ? h('p', null, '该版本不存在（删除或新增冲突）')
-      : h('pre', { className: 'gg-conflict-code', tabIndex: 0 }, (value.text ?? '').split('\n').map((line, i) => h('span', { className: 'gg-conflict-line', key: i }, h('span', { className: 'gg-conflict-line-number', 'aria-hidden': true }, i + 1), line, '\n'))))
+    h('strong', null, title), value.source ? h('div', { className: 'gg-conflict-source' }, value.source) : null,
+    value.reason ? h('p', null, value.reason) : !value.exists ? h('p', null, '该版本不存在（删除或新增冲突）')
+      : h('pre', { className: 'gg-conflict-code', tabIndex: 0, 'aria-label': title + '代码和行号' }, (value.text ?? '').replace(/\r?\n$/, '').split(/\r?\n/).map((line, i) => h('span', { className: 'gg-conflict-line', key: i }, h('span', { className: 'gg-conflict-line-number' }, i + 1), line || ' '))))
   const ours = detail?.operation === 'rebase' ? '当前方（目标分支及已重放提交）' : '当前方（HEAD）'
   const theirs = detail?.operation === 'rebase' ? '传入方（正在重放的提交）' : '传入方（待合入提交）'
   const resolve = (choice: 'result' | 'ours' | 'theirs' | 'delete') => { if (detail) void mutate('resolve-conflict', { path: detail.path, token: detail.token, choice }) }
@@ -136,13 +139,16 @@ export function GitConflictsTab(props: Props) {
     detail ? h('div', null,
       h('div', { className: 'gg-tab-toolbar' }, h('strong', null, detail.path), h('span', null, dirty ? '有未保存编辑' : '与工作区一致'), button('丢弃草稿并重新加载', () => { if (!dirty || window.confirm('丢弃该文件尚未保存的编辑？')) void select(detail.path, true) })),
       detail.special ? h('p', { className: 'gg-sync-warning' }, '特殊冲突：可选择整份一方版本或删除文件。符号链接、子模块及超限文件请使用外部工具。') : null,
-      h('div', { className: 'gg-conflict-grid' }, version('基础版本', detail.base), version(ours, detail.ours), version(theirs, detail.theirs),
-        h('section', { className: 'gg-conflict-version' }, h('strong', null, '结果（可编辑）'), detail.editable ? h('textarea', { ref: editor, className: 'gg-conflict-editor', 'aria-label': '冲突解决结果', value: text, disabled: busy, spellCheck: false, onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.currentTarget.value) }) : version('工作区', detail.result))),
+      h('div', { className: 'gg-conflict-grid', 'aria-label': '三方冲突对比' }, version(ours, detail.ours), version(theirs, detail.theirs),
+        detail.editable ? h('section', { className: 'gg-conflict-version' }, h('strong', null, '结果（可编辑）'), h('div', { className: 'gg-conflict-source' }, '工作区 · 高亮行号表示未解决冲突'),
+          h('div', { className: 'gg-conflict-edit-surface' },
+            h('div', { ref: gutter, className: 'gg-conflict-gutter', 'aria-hidden': true }, text.split('\n').map((_, i) => h('span', { key: i, className: 'gg-conflict-line-number' + (ranges.some(range => i + 1 >= range.start && i + 1 <= range.end) ? ' unresolved' : '') }, i + 1))),
+            h('textarea', { ref: editor, className: 'gg-conflict-editor', 'aria-label': '冲突解决结果', wrap: 'off', value: text, disabled: busy, spellCheck: false, onScroll: (e: React.UIEvent<HTMLTextAreaElement>) => { if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop }, onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.currentTarget.value) }))) : version('结果（工作区）', detail.result)),
       h('div', { className: 'gg-actions' }, button('保存结果', () => { void mutate('save-conflict', { path: detail.path, token: detail.token, content: text }) }, !dirty || !detail.editable), button('标记解决', () => resolve('result'), dirty || blocks.length > 0 || detail.result.text === null, true),
         button('采用整份当前方并标记', () => resolve('ours'), dirty || !detail.ours.exists || (!!detail.ours.reason && !detail.ours.reason.startsWith('二进制'))), button('采用整份传入方并标记', () => resolve('theirs'), dirty || !detail.theirs.exists || (!!detail.theirs.reason && !detail.theirs.reason.startsWith('二进制'))),
         button('删除文件并标记', () => { if (window.confirm('删除 ' + detail.path + ' 并将此删除标记为解决？')) resolve('delete') }, dirty)),
       detail.editable ? h('div', { className: 'gg-conflict-blocks' }, h('strong', null, '剩余 ' + blocks.length + ' 个冲突块'), button('下一个冲突块', () => { const index = nextBlock.current % blocks.length; nextBlock.current = index + 1; const block = blocks[index]; if (block) { editor.current?.focus(); editor.current?.setSelectionRange(block.start, block.end); document.getElementById('gg-conflict-block-' + index)?.scrollIntoView({ block: 'nearest' }) } }, !blocks.length), blocks.map((block, index) => h('section', { className: 'gg-conflict-block', id: 'gg-conflict-block-' + index, key: block.start },
-        h('strong', null, '冲突块 ' + (index + 1)), h('div', { className: 'gg-conflict-grid' }, h('pre', null, ours + '\n' + block.ours), block.base !== null ? h('pre', null, '基础版本\n' + block.base) : null, h('pre', null, theirs + '\n' + block.theirs)),
+        h('strong', null, '冲突块 ' + (index + 1) + ' · 结果第 ' + ranges[index]!.start + '–' + ranges[index]!.end + ' 行（' + (ranges[index]!.end - ranges[index]!.start + 1) + ' 行，含冲突标记）'), h('div', { className: 'gg-conflict-block-sides' }, h('pre', { className: 'gg-diff-deleted' }, ours + '\n' + block.ours), h('pre', { className: 'gg-diff-added' }, theirs + '\n' + block.theirs)),
         h('div', { className: 'gg-actions' }, ...(['ours', 'theirs', 'both'] as const).map(choice => button(choice === 'ours' ? '采用当前方' : choice === 'theirs' ? '采用传入方' : '保留双方（当前在前）', () => setText(chooseConflictBlock(text, block, choice)))),
           button('定位并编辑', () => { editor.current?.focus(); editor.current?.setSelectionRange(block.start, block.end) })),
       ))) : null,
