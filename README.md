@@ -68,17 +68,17 @@ Use the Git button beside the composer to inspect changes, review commit history
 Open **Git workbench → 冲突解决 (Conflict resolution)**, also linked from Changes and Sync:
 
 1. Inspect conflicted files and the active Merge / Rebase / Cherry-pick operation, or start an operation using a branch or commit reference.
-2. Compare the base, current side, incoming side, and editable result. Accept either side per block, keep both with the current side first, edit the result manually, or jump to the next block.
+2. Compare three panes: current side, incoming side, and editable result, with commit references and short SHAs identifying the two sides. Each pane shows its own line numbers; result numbers track editing and scrolling and highlight unresolved conflicts. Each block shows its result line range and count (including markers). Accept either side, keep both with the current side first, edit manually, or jump to the next block.
 3. Save the result to the working tree, then mark it resolved to stage it. Remaining conflict markers block resolution; external file or operation changes invalidate the snapshot instead of silently overwriting new content.
 4. Continue after all files are resolved. Further conflicts refresh the list. Explicit confirmation also enables abort, or skipping the current Rebase / Cherry-pick commit, including empty commits.
 
-During Rebase, the current side is the target branch plus replayed commits; the incoming side is the commit being replayed. Delete/modify conflicts offer explicit deletion. Binary and non-UTF-8 conflicts offer whole-side selection. Text editing supports up to 48 KiB per version; use external tools for larger files, symlinks, and submodules, then refresh.
+The incoming side is the actual conflict source for this operation, not necessarily the current branch’s remote upstream. During Rebase, the current side is the target branch plus replayed commits; the incoming side is the commit being replayed. Delete/modify conflicts offer explicit deletion. Binary and non-UTF-8 conflicts offer whole-side selection. Text editing supports up to 48 KiB per version; use external tools for larger files, symlinks, and submodules, then refresh.
 
 Unsaved edits block tab switching and retain a draft for the current page lifetime. Browser reload warns before losing edits, but drafts do not persist across reloads. Authenticated session actions read the content; file writes and Git commands run through Harness Shell with the session sandbox policy.
 
 After upgrading the local plugin, restart the Harness backend and refresh the browser so both Host and Client load the new build.
 
-Conflict-resolution validation: all 91 tests and 27 reproducible build artifacts passed, covering four-way reads, block choices, save/resolve, successive Rebase conflicts, empty-commit skipping, linked worktrees, stale snapshots, and session isolation. Full Merge, Rebase, and Cherry-pick browser workflows were verified using an isolated temporary Harness instance and real Git repositories, including block choices, manual edits, whole-side selection, saving, resolving, and continuing. Regression coverage also includes valid separator lines, unborn repositories, and special filenames.
+Conflict-resolution validation: all 92 tests and 27 reproducible build artifacts passed, covering base/side reads, three-pane display and commit sources, dynamic line numbers and conflict ranges, block choices, save/resolve, successive Rebase conflicts, empty-commit skipping, linked worktrees, stale snapshots, and session isolation. Full Merge, Rebase, and Cherry-pick browser workflows were verified using an isolated temporary Harness instance and real Git repositories, including block choices, manual edits, whole-side selection, saving, resolving, and continuing. Regression coverage also includes valid separator lines, unborn repositories, and special filenames.
 
 
 
