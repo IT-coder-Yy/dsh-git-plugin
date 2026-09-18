@@ -1,5 +1,5 @@
-import { createPanelController } from './panel-controller';
-import { appendCommandLog, analysisProposalId, beginTrackedRequest, buildAgentRepairPrompt, canDismissFailedProposal, buildFileTree, cancelTrackedRequest, clampWorkbenchRatio, commitFileTone, deriveCommitGraph, filterLocalBranches, failureContext, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, openRecoveryProposal, parseReviewRows, pendingProposalTransition, recoveryProposalId, repositoryName, shouldShowAnalysisBanner, type AnyRecord } from './view-model';
+import { registerWorkbench, requestAgentAnalysis } from './panel-controller';
+import { appendCommandLog, analysisProposalId, beginTrackedRequest, buildAgentRepairPrompt, canDismissFailedProposal, buildFileTree, cancelTrackedRequest, commitFileTone, deriveCommitGraph, filterLocalBranches, failureContext, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, openRecoveryProposal, parseReviewRows, pendingProposalTransition, recoveryProposalId, repositoryName, shouldShowAnalysisBanner, type AnyRecord } from './view-model';
 type RefreshState = 'idle' | 'loading' | 'succeeded' | 'failed';
 declare function injectStyles(): () => void;
 declare function refreshButtonLabel(state: RefreshState): string;
@@ -9,14 +9,14 @@ declare const plugin: {
     inject: string[];
     apply(ctx: AnyRecord): void;
     __testing: {
-        createPanelController: typeof createPanelController;
+        registerWorkbench: typeof registerWorkbench;
+        requestAgentAnalysis: typeof requestAgentAnalysis;
         buildFileTree: typeof buildFileTree;
         parseReviewRows: typeof parseReviewRows;
         renderRawDiffSurface: typeof renderRawDiffSurface;
         renderReviewSurface: typeof renderReviewSurface;
         injectStyles: typeof injectStyles;
         filterLocalBranches: typeof filterLocalBranches;
-        clampWorkbenchRatio: typeof clampWorkbenchRatio;
         deriveCommitGraph: typeof deriveCommitGraph;
         repositoryName: typeof repositoryName;
         mutationCommand: typeof mutationCommand;

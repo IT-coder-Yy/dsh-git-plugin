@@ -1,171 +1,47 @@
+import type { AnyRecord } from './view-model'
+
 export type Dispose = () => void
 
-export interface PanelSnapshot {
-  detailsReady: boolean
-  activeSessionId: string | null
-  open: boolean
-  error: string
+const WORKBENCH_ID = 'dsh-easygit-plugin'
+const WORKBENCH_KIND = 'easygit'
+
+/** Use the session-scoped conversation service; Connection no longer owns domain APIs. */
+export async function requestAgentAnalysis(sessions: AnyRecord, sessionId: string, text: string): Promise<void> {
+  const scope = sessions.scope(sessionId)
+  if (!scope?.conversation) throw new Error('当前会话不可用，无法请求 Agent 分析')
+  await scope.conversation.send(text)
 }
 
-export interface PanelController {
-  attachDetails(): Dispose
-  open(sessionId: unknown): boolean
-  close(sessionId?: unknown): boolean
-  toggle(sessionId: unknown): boolean
-  isOpen(sessionId: unknown): boolean
-  subscribe(listener: (state: PanelSnapshot) => void): Dispose
-  snapshot(): PanelSnapshot
-}
-
-interface SlotsLike {
-  register(definition: Record<string, unknown>, renderer: (props: Record<string, unknown>) => unknown): unknown
-}
-
-interface LayoutLike {
-  openDetails(): void
-  closeDetails(): void
-}
-
-export interface PanelControllerOptions {
-  slots?: SlotsLike | null
-  layout?: LayoutLike | null
-  renderPanel: (props: { sessionId: string; close: Dispose }) => unknown
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function markWorkbenchOpen(open: boolean): void {
-  if (typeof document === 'undefined' || !document.documentElement) return
-  if (open) document.documentElement.setAttribute('data-easygit-workbench-open', '')
-  else document.documentElement.removeAttribute('data-easygit-workbench-open')
-}
-
-/**
- * Mount the workbench only while it is open. Harness's built-in DetailsPanel
- * uses priority 0, so the workbench temporarily overrides it at -10 and
- * immediately releases the registration when closed.
- */
-export function createPanelController(options: PanelControllerOptions): PanelController {
-  const slots = options.slots
-  const layout = options.layout
-  const renderPanel = options.renderPanel
-  const listeners = new Set<(state: PanelSnapshot) => void>()
-  let detailsReady = false
-  let activeSessionId: string | null = null
-  let disposePanel: Dispose | null = null
-  let error = ''
-
-  const snapshot = (): PanelSnapshot => ({
-    detailsReady,
-    activeSessionId,
-    open: activeSessionId !== null && disposePanel !== null,
-    error,
-  })
-  const notify = (): void => {
-    const state = snapshot()
-    for (const listener of listeners) listener(state)
-  }
-  const close = (sessionId?: unknown): boolean => {
-    if (sessionId !== undefined && sessionId !== null && activeSessionId !== String(sessionId)) return false
-    const dispose = disposePanel
-    const wasOpen = activeSessionId !== null || typeof dispose === 'function'
-    activeSessionId = null
-    disposePanel = null
-    markWorkbenchOpen(false)
-    if (typeof dispose === 'function') {
-      try { dispose() } catch (caught) { error = errorText(caught) }
-    }
-    if (wasOpen && layout && typeof layout.closeDetails === 'function') {
-      try { layout.closeDetails() } catch (caught) { error = errorText(caught) }
-    }
-    notify()
-    return wasOpen
-  }
-  const open = (sessionId: unknown): boolean => {
-    const targetSessionId = String(sessionId || '')
-    if (!targetSessionId) {
-      error = '当前会话不可用，无法打开 Git 工作台'
-      notify()
-      return false
-    }
-    if (!detailsReady || !slots || typeof slots.register !== 'function') {
-      error = '当前 Harness 尚未提供右侧详情栏，无法打开 Git 工作台'
-      notify()
-      return false
-    }
-    if (!layout || typeof layout.openDetails !== 'function' || typeof layout.closeDetails !== 'function') {
-      error = '当前 Harness 不支持详情栏开关，无法打开 Git 工作台'
-      notify()
-      return false
-    }
-    if (activeSessionId === targetSessionId && typeof disposePanel === 'function') {
-      try {
-        layout.openDetails()
-        error = ''
-      } catch (caught) {
-        error = errorText(caught)
-      }
-      notify()
-      return error === ''
-    }
-
-    if (activeSessionId !== null || typeof disposePanel === 'function') close()
-    let dispose: unknown = null
-    try {
-      layout.openDetails()
-      dispose = slots.register(
-        { name: 'details', priority: -10 },
-        (props) => {
-          const currentSessionId = String(props.sessionId || '')
-          if (currentSessionId !== targetSessionId || activeSessionId !== targetSessionId) return null
-          return renderPanel({ sessionId: currentSessionId, close: () => close(currentSessionId) })
-        },
-      )
-      if (typeof dispose !== 'function') throw new Error('details 插槽未返回可释放的注册句柄')
-      activeSessionId = targetSessionId
-      disposePanel = dispose as Dispose
-      markWorkbenchOpen(true)
-      error = ''
-      notify()
-      return true
-    } catch (caught) {
-      if (typeof dispose === 'function') {
-        try { dispose() } catch (disposeError) { /* Preserve the original error. */ }
-      }
-      activeSessionId = null
-      disposePanel = null
-      markWorkbenchOpen(false)
-      try { layout.closeDetails() } catch (closeError) { /* Preserve the original error. */ }
-      error = errorText(caught)
-      notify()
-      return false
-    }
-  }
-
-  return {
-    attachDetails() {
-      detailsReady = true
-      error = ''
-      notify()
-      return () => {
-        detailsReady = false
-        close()
-      }
+/** Register a native tab without taking over the host's layout or other tabs. */
+export function registerWorkbench(ctx: AnyRecord, renderPanel: (props: {
+  sessionId: string
+  close: Dispose
+  sendPrompt(text: string): Promise<void>
+}) => unknown): (sessionId: string) => void {
+  const slots = ctx.get('slots')
+  const tabs = ctx.get('sidebarRightTabs')
+  const sidebar = ctx.get('sidebarRight')
+  const sessions = ctx.get('sessions')
+  ctx.effect(() => tabs.register({
+    id: WORKBENCH_ID,
+    kind: WORKBENCH_KIND,
+    title: () => 'Git 工作台',
+    guide: [{ id: WORKBENCH_KIND, order: 30, title: () => 'Git 工作台', description: () => '查看仓库、提交记录和 Git 操作建议' }],
+  }), 'easygit: tab type')
+  slots.inject('sidebar.right.pane.tab', () => slots.register(
+    { name: 'sidebar.right.pane.tab', key: WORKBENCH_ID },
+    (props: AnyRecord) => {
+      const { tab } = props.useTabInfo()
+      if (!tab.visible) return null
+      return renderPanel({
+        sessionId: props.sessionId,
+        close: () => tab.actions.close(),
+        sendPrompt: (text) => requestAgentAnalysis(sessions, props.sessionId, text),
+      })
     },
-    open,
-    close,
-    toggle(sessionId: unknown) {
-      return activeSessionId === String(sessionId || '') ? close(sessionId) : open(sessionId)
-    },
-    isOpen(sessionId: unknown) {
-      return activeSessionId === String(sessionId || '') && typeof disposePanel === 'function'
-    },
-    subscribe(listener) {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
-    snapshot,
+  ))
+  return (sessionId) => {
+    if (!sessionId) throw new Error('当前会话不可用，无法打开 Git 工作台')
+    sidebar.openTabIn(sessionId, WORKBENCH_KIND)
   }
 }

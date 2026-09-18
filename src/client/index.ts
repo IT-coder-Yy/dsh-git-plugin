@@ -4,15 +4,11 @@
  * The build script wraps this module in Harness's ModuleLoader factory format;
  * source code exports only the Cordis plugin object. Client-to-Host traffic
  * uses same-origin POST /easygit actions. The workbench is mounted in the
- * native details column and controlled from the composer tool row.
+ * native right-sidebar tab and controlled from the composer tool row.
  */
 const React = require('react')
-import { createPanelController, type Dispose, type PanelController } from './panel-controller'
+import { registerWorkbench, requestAgentAnalysis, type Dispose } from './panel-controller'
 import {
-  WORKBENCH_DEFAULT_RATIO,
-  WORKBENCH_MAX_RATIO,
-  WORKBENCH_MIN_RATIO,
-  WORKBENCH_TRACK,
   appendCommandLog,
   analysisProposalId,
   beginTrackedRequest,
@@ -20,13 +16,11 @@ import {
   canDismissFailedProposal,
   buildFileTree,
   cancelTrackedRequest,
-  clampWorkbenchRatio,
   commitFileTone,
   deriveCommitGraph,
   diffLineClass,
   filterLocalBranches,
   failureContext,
-  findWorkbenchHostSplit,
   isAbortError,
   isCurrentCommitRequest,
   isLatestRequest,
@@ -36,22 +30,15 @@ import {
   openRecoveryProposal,
   parseReviewRows,
   pendingProposalTransition,
-  persistWorkbenchRatio,
-  readWorkbenchRatio,
   recoveryProposalId,
   repositoryName,
-  sidebarTrackWidth,
   shouldShowAnalysisBanner,
-  viewportWidth,
-  workbenchTrackForRatio,
-  type ActiveHostSplit,
   type AnyRecord,
   type CommandLogEntry,
   type CommitGraphRow,
   type FileTreeNode,
   type RepositoryMutationAction,
   type RequestSlot,
-  type ResizeDrag,
 } from './view-model'
 import type {
   ActionResult,
@@ -78,14 +65,14 @@ type TimerFn = (callback: () => void, delayMs: number) => Dispose | void
 
 interface GitWorkbenchActionProps {
   sessionId?: unknown
-  controller: PanelController
+  openWorkbench(sessionId: string): void
   intervalFn?: TimerFn | null
 }
 
 interface GitWorkbenchPanelProps {
   sessionId: string
   close: Dispose
-  connection?: AnyRecord | null
+  sendPrompt(text: string): Promise<void>
   intervalFn?: TimerFn | null
   timeoutFn?: TimerFn | null
 }
@@ -197,13 +184,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-workbench-action[aria-pressed="true"] { border: 0; background: var(--dsw-alias-button-ghost-active-fill, rgba(127,127,127,.16)); color: var(--dsw-alias-state-business-primary, #3964fe); }
         .gg-workbench-action[aria-pressed="true"]:hover:not(:disabled) { background: var(--dsw-alias-button-ghost-active-hover, rgba(127,127,127,.22)); }
         .gg-workbench-action-dot { width: 6px; height: 6px; border-radius: 50%; background: #e17b00; display: inline-block; }
-        html[data-easygit-workbench-open] div[data-side='details'][data-side='details'] { display: none !important; pointer-events: none !important; }
-        .gg-workbench { position: fixed; z-index: 1; inset: 0 0 0 auto; box-sizing: border-box; width: var(--dsh-easygit-plugin-workbench-width, 36vw); max-width: 100vw; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid rgba(174,180,184,.75); color: #e9ecef; background: #202224; box-shadow: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-        .gg-workbench-resize { position: absolute; z-index: 5; top: 0; bottom: 0; left: -6px; width: 12px; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
-        .gg-workbench-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: rgba(127,127,127,.32); transition: background-color .12s ease, box-shadow .12s ease; }
-        .gg-workbench-resize:hover::after, .gg-workbench-resize:focus-visible::after, .gg-workbench-resize.dragging::after { background: #00c58b; box-shadow: 0 0 0 1px rgba(0,197,139,.28); }
-        .gg-workbench-resize:focus-visible { outline: 2px solid #00c58b; outline-offset: -2px; }
-        html[data-easygit-workbench-resizing], html[data-easygit-workbench-resizing] * { cursor: col-resize !important; user-select: none !important; }
+        .gg-workbench { position: relative; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid rgba(174,180,184,.75); color: #e9ecef; background: #202224; box-shadow: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
         .gg-workbench-head { box-sizing: border-box; display: flex; min-height: 75px; flex: none; align-items: center; gap: 8px; padding: 14px 12px 12px; border-bottom: 1px solid #aeb4b8; }
         .gg-workbench-title { font-size: 14px; line-height: 20px; font-weight: 500; color: #f4f4f4; }
         .gg-workbench-close { display: grid; width: 28px; height: 28px; margin-left: auto; place-items: center; border: 0; border-radius: 999px; padding: 0; background: transparent; color: var(--dsw-alias-label-secondary, inherit); }
@@ -400,12 +381,9 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-workbench-close:hover:not(:disabled) { color: var(--gg-text); background: var(--gg-surface-raised); }
         .gg-workbench-close:active:not(:disabled) { transform: translateY(1px); }
         .gg-workbench-body { padding: 0 12px 12px; }
-        .gg-workbench-resize::after { left: 5px; width: 1px; background: var(--gg-border-strong); }
-        .gg-workbench-resize:hover::after, .gg-workbench-resize:focus-visible::after, .gg-workbench-resize.dragging::after {
           background: var(--gg-accent);
           box-shadow: 0 0 0 1px color-mix(in srgb, var(--gg-accent) 18%, transparent);
         }
-        .gg-workbench-resize:focus-visible { outline-color: var(--gg-accent); }
 
         .gg-tabs {
           position: sticky;
@@ -640,14 +618,16 @@ interface SyncTabProps extends RepositoryTabProps {}
 
     function GitWorkbenchAction(props: GitWorkbenchActionProps) {
       const sessionId = String(props.sessionId || '')
-      const controller = props.controller
       const intervalFn = props.intervalFn || null
-      const [state, setState] = React.useState(() => controller.snapshot())
+      const [error, setError] = React.useState('')
+      const openWorkbench = () => {
+        try { props.openWorkbench(sessionId); setError('') }
+        catch (caught) { setError(errorText(caught)) }
+      }
       const [pending, setPending] = React.useState(false)
       const pendingProposalId = React.useRef(null)
       const stateRequestRef = React.useRef({ controller: null, sequence: 0 } as RequestSlot)
 
-      React.useEffect(() => controller.subscribe(setState), [controller])
       React.useEffect(() => {
         const refresh = () => {
           const request = beginTrackedRequest(stateRequestRef)
@@ -658,7 +638,7 @@ interface SyncTabProps extends RepositoryTabProps {}
               const isPending = !!(proposal && proposal.status === 'pending' && proposal.proposalId)
               setPending(isPending)
               const proposalId = isPending ? proposal.proposalId : null
-              if (proposalId && proposalId !== pendingProposalId.current) controller.open(sessionId)
+              if (proposalId && proposalId !== pendingProposalId.current) openWorkbench()
               pendingProposalId.current = proposalId
             })
             .catch((error) => {
@@ -672,18 +652,16 @@ interface SyncTabProps extends RepositoryTabProps {}
           if (typeof stop === 'function') {
             try { stop() } catch (err) { /* ignore */ }
           }
-          controller.close(sessionId)
         }
-      }, [controller, intervalFn, sessionId])
+      }, [props.openWorkbench, intervalFn, sessionId])
 
-      const open = state.open && state.activeSessionId === sessionId
       return React.createElement('button', {
         type: 'button',
         className: 'gg-btn gg-workbench-action',
-        title: state.error || (open ? '关闭 Git 工作台' : '打开 Git 工作台'),
-        'aria-label': state.error || 'Git 工作台',
-        'aria-pressed': open,
-        onClick: () => controller.toggle(sessionId),
+        title: error || '打开 Git 工作台',
+        'aria-label': error || 'Git 工作台',
+        disabled: !sessionId,
+        onClick: openWorkbench,
       },
       React.createElement('span', null, 'Git'),
       pending ? React.createElement('span', { className: 'gg-workbench-action-dot', 'aria-hidden': true }) : null,
@@ -733,10 +711,6 @@ interface SyncTabProps extends RepositoryTabProps {}
           React.createElement('pre', { className: 'gg-pre' }, details),
         ),
       )
-    }
-
-    function clientTimeZone(): string | undefined {
-      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined } catch (error) { return undefined }
     }
 
     function refreshButtonLabel(state: RefreshState): string {
@@ -1786,9 +1760,6 @@ interface SyncTabProps extends RepositoryTabProps {}
     function GitWorkbenchPanel(props: GitWorkbenchPanelProps) {
       const [tab, setTab] = React.useState('changes')
       const [revision, setRevision] = React.useState(0)
-      const [ratio, setRatio] = React.useState(readWorkbenchRatio)
-      const [currentViewportWidth, setCurrentViewportWidth] = React.useState(viewportWidth)
-      const [isResizing, setIsResizing] = React.useState(false)
       const [commandLogs, setCommandLogs] = React.useState([])
       const [pendingAnalysis, setPendingAnalysis] = React.useState(null as null | {
         proposalId: string
@@ -1796,9 +1767,6 @@ interface SyncTabProps extends RepositoryTabProps {}
         status: 'ready' | 'requesting' | 'waiting' | 'dismissing'
         error: string
       })
-      const rootRef = React.useRef(null)
-      const hostSplitRef = React.useRef(null)
-      const resizeDragRef = React.useRef(null)
       const commandSeqRef = React.useRef(0)
       const commandLogBodyRef = React.useRef(null)
       const delayedOpenDisposers = React.useRef([])
@@ -1837,16 +1805,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         rpc({ action: 'request-analysis', sessionId: props.sessionId, proposalId: current.proposalId })
           .then((response) => {
             if (!response || response.ok !== true) throw new Error(String(response?.error || '无法标记分析请求'))
-            const sessions = props.connection?.api?.sessions
-            const prompt = sessions?.prompt
-            if (typeof prompt !== 'function') throw new Error('DSH connection 服务不可用，无法请求 Agent 分析')
-            const zone = clientTimeZone()
-            return prompt.call(sessions, {
-              sessionId: props.sessionId,
-              mode: 'queue',
-              content: [{ type: 'text', text: buildAgentRepairPrompt(current.failure) }],
-              ...(zone ? { clientTimeZone: zone } : {}),
-            })
+            return props.sendPrompt(buildAgentRepairPrompt(current.failure))
           })
           .then(() => setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId
             ? { ...active, status: 'waiting', error: '' }
@@ -1936,93 +1895,6 @@ interface SyncTabProps extends RepositoryTabProps {}
         const element = commandLogBodyRef.current as HTMLElement | null
         if (element) element.scrollTop = element.scrollHeight
       }, [commandLogs])
-      React.useLayoutEffect(() => {
-        if (!rootRef.current) return undefined
-        const layout = findWorkbenchHostSplit(rootRef.current)
-        if (!layout) return undefined
-        const previousGridTemplateColumns = layout.frame.style.gridTemplateColumns
-        const previousTrack = layout.frame.style.getPropertyValue(WORKBENCH_TRACK)
-        const previousDetailsWidth = layout.details.style.width
-        const previousDetailsMinWidth = layout.details.style.minWidth
-        const previousDetailsMaxWidth = layout.details.style.maxWidth
-        const previousDetailsBorderLeft = layout.details.style.borderLeft
-        const splitColumns = `${sidebarTrackWidth(layout)}px minmax(0, 1fr) var(${WORKBENCH_TRACK})`
-        layout.frame.style.setProperty(WORKBENCH_TRACK, workbenchTrackForRatio(ratio))
-        layout.frame.style.gridTemplateColumns = splitColumns
-        layout.details.style.width = '100%'
-        layout.details.style.minWidth = '0'
-        layout.details.style.maxWidth = 'none'
-        layout.details.style.borderLeft = 'none'
-        hostSplitRef.current = {
-          layout, splitColumns, previousGridTemplateColumns, previousTrack,
-          previousDetailsWidth, previousDetailsMinWidth, previousDetailsMaxWidth, previousDetailsBorderLeft,
-        } as ActiveHostSplit
-        return () => {
-          if (layout.frame.style.gridTemplateColumns === splitColumns) layout.frame.style.gridTemplateColumns = previousGridTemplateColumns
-          if (previousTrack) layout.frame.style.setProperty(WORKBENCH_TRACK, previousTrack)
-          else layout.frame.style.removeProperty(WORKBENCH_TRACK)
-          layout.details.style.width = previousDetailsWidth
-          layout.details.style.minWidth = previousDetailsMinWidth
-          layout.details.style.maxWidth = previousDetailsMaxWidth
-          layout.details.style.borderLeft = previousDetailsBorderLeft
-          hostSplitRef.current = null
-        }
-      }, [props.sessionId, currentViewportWidth])
-      React.useEffect(() => {
-        const resize = () => setCurrentViewportWidth(viewportWidth())
-        window.addEventListener('resize', resize)
-        return () => {
-          window.removeEventListener('resize', resize)
-          document.documentElement.removeAttribute('data-easygit-workbench-resizing')
-        }
-      }, [])
-
-      const setWorkbenchRatio = (nextValue: number, persist: boolean) => {
-        const next = clampWorkbenchRatio(nextValue)
-        const active = hostSplitRef.current as ActiveHostSplit | null
-        if (active) active.layout.frame.style.setProperty(WORKBENCH_TRACK, workbenchTrackForRatio(next))
-        setRatio(next)
-        if (persist) persistWorkbenchRatio(next)
-      }
-      const onResizePointerDown = (event: AnyRecord) => {
-        if (event.button !== 0) return
-        resizeDragRef.current = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startWidth: viewportWidth() * ratio,
-          currentRatio: ratio,
-        } as ResizeDrag
-        if (event.currentTarget.focus) event.currentTarget.focus()
-        document.documentElement.setAttribute('data-easygit-workbench-resizing', '')
-        setIsResizing(true)
-        event.preventDefault()
-      }
-      React.useEffect(() => {
-        if (!isResizing) return undefined
-        const move = (event: AnyRecord) => {
-          const drag = resizeDragRef.current as ResizeDrag | null
-          if (!drag || drag.pointerId !== event.pointerId) return
-          drag.currentRatio = clampWorkbenchRatio((drag.startWidth + drag.startX - event.clientX) / viewportWidth())
-          setWorkbenchRatio(drag.currentRatio, false)
-          event.preventDefault()
-        }
-        const finish = (event: AnyRecord) => {
-          const drag = resizeDragRef.current as ResizeDrag | null
-          if (!drag || drag.pointerId !== event.pointerId) return
-          resizeDragRef.current = null
-          document.documentElement.removeAttribute('data-easygit-workbench-resizing')
-          setIsResizing(false)
-          persistWorkbenchRatio(drag.currentRatio)
-        }
-        document.addEventListener('pointermove', move, { passive: false })
-        document.addEventListener('pointerup', finish)
-        document.addEventListener('pointercancel', finish)
-        return () => {
-          document.removeEventListener('pointermove', move)
-          document.removeEventListener('pointerup', finish)
-          document.removeEventListener('pointercancel', finish)
-        }
-      }, [isResizing])
       const tabs = [
         { id: 'changes', label: '变更' },
         { id: 'branches', label: '分支' },
@@ -2074,21 +1946,8 @@ interface SyncTabProps extends RepositoryTabProps {}
         ) : null,
       ) : null
       return React.createElement('aside', {
-        className: 'gg-workbench', 'aria-label': 'Git 工作台', ref: rootRef,
-        style: { [WORKBENCH_TRACK]: workbenchTrackForRatio(ratio) },
+        className: 'gg-workbench', 'aria-label': 'Git 工作台',
       },
-        React.createElement('div', {
-          className: 'gg-workbench-resize' + (isResizing ? ' dragging' : ''), role: 'separator', tabIndex: 0,
-          'aria-label': '调整 Git 工作台宽度', 'aria-orientation': 'vertical',
-          'aria-valuemin': Math.round(WORKBENCH_MIN_RATIO * 100), 'aria-valuemax': Math.round(WORKBENCH_MAX_RATIO * 100),
-          'aria-valuenow': Math.round(ratio * 100),
-          title: '左右拖动调整工作台宽度', onPointerDown: onResizePointerDown,
-          onKeyDown: (event: AnyRecord) => {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-            event.preventDefault()
-            setWorkbenchRatio(ratio + (event.key === 'ArrowLeft' ? .02 : -.02), true)
-          },
-        }),
         React.createElement('div', { className: 'gg-workbench-head' },
           React.createElement('span', { className: 'gg-workbench-title' }, 'Git 工作台'),
           React.createElement('button', {
@@ -2427,7 +2286,7 @@ interface SyncTabProps extends RepositoryTabProps {}
     }
 
     const plugin = {
-      inject: ['slots', 'timer', 'layout', 'connection'],
+      inject: ['slots', 'timer', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'conversation'],
       apply(ctx: AnyRecord) {
         if (typeof ctx.effect === 'function') ctx.effect(injectStyles, 'easygit: styles')
         else injectStyles()
@@ -2438,29 +2297,19 @@ interface SyncTabProps extends RepositoryTabProps {}
         const timer = ctx.get('timer') || ctx.timer
         const intervalFn = timer && typeof timer.interval === 'function' ? timer.interval.bind(timer) : null
         const timeoutFn = timer && typeof timer.timeout === 'function' ? timer.timeout.bind(timer) : null
-        const layout = ctx.get('layout') || ctx.layout
-        const connection = ctx.get('connection') || ctx.connection || null
-        const controller = createPanelController({
-          slots,
-          layout,
-          renderPanel: (panelProps) => React.createElement(GitWorkbenchPanel, {
-            sessionId: panelProps.sessionId,
-            close: panelProps.close,
-            connection,
-            intervalFn,
-            timeoutFn,
-          }),
-        })
-
-        slots.inject('details', () => controller.attachDetails())
+        const openWorkbench = registerWorkbench(ctx, (panelProps) => React.createElement(GitWorkbenchPanel, {
+          ...panelProps,
+          intervalFn,
+          timeoutFn,
+        }))
         slots.inject('conversation.input.left', () => slots.register(
           { name: 'conversation.input.left', id: 'git-workbench', order: 30, label: 'Git 工作台' },
-          (props: AnyRecord) => React.createElement(GitWorkbenchAction, { sessionId: props.sessionId, controller, intervalFn }),
+          (props: AnyRecord) => React.createElement(GitWorkbenchAction, { sessionId: props.sessionId, openWorkbench, intervalFn }),
         ))
       },
       __testing: {
-        createPanelController, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
-        clampWorkbenchRatio, deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
+        registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
+        deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
         refreshButtonLabel, recoveryProposalId, openRecoveryProposal, analysisProposalId, failureContext, buildAgentRepairPrompt,
         shouldShowAnalysisBanner, canDismissFailedProposal, pendingProposalTransition,
         isCurrentCommitRequest, nextCommitSelection, commitFileTone, isLatestRequest,

@@ -45,9 +45,9 @@ test('Host Action 路由与 Client 生命周期、视图模型保持独立模块
 
   assert.match(client, /from '\.\/panel-controller'/)
   assert.match(client, /from '\.\/view-model'/)
-  assert.doesNotMatch(client, /function\s+createPanelController\s*\(/)
+  assert.doesNotMatch(client, /function\s+registerWorkbench\s*\(/)
   assert.doesNotMatch(client, /function\s+(?:buildFileTree|parseReviewRows|deriveCommitGraph)\s*\(/)
-  assert.match(controller, /export function createPanelController/)
+  assert.match(controller, /export function registerWorkbench/)
   assert.match(viewModel, /export function buildFileTree/)
   assert.match(viewModel, /export function parseReviewRows/)
   assert.match(viewModel, /export function deriveCommitGraph/)
@@ -274,8 +274,8 @@ test('HTTP 路由严格按 sessionId 隔离提议', async () => {
   plugin.apply({
     get: (key) => key === 'tools' ? tools : key === 'shell' ? shell : key === 'webServer' ? webServer : null,
     inject: (deps, callback) => {
-      assert.deepStrictEqual(deps, ['webServer'])
-      return callback({ get: (key) => key === 'webServer' ? webServer : null })
+      assert.deepStrictEqual(deps, ['webServer', 'connection'])
+      return callback({ get: (key) => key === 'webServer' ? webServer : key === 'connection' ? { requestRejection: () => undefined } : null })
     },
   })
   const propose = registered.find((definition) => definition.name === 'git_propose')
@@ -485,4 +485,81 @@ test('提议持久化：执行中重启按失败关闭，防止不确定命令�
   assert.strictEqual(proposal.closed, true)
   assert.match(proposal.result.error, /无法确认/)
   assert.strictEqual(restarted.latestPending('persisted-session'), null)
+})
+
+test('Web 操作复用 DSH Connection 认证，拒绝未登录与不可信来源', async () => {
+  for (const rejection of [401, 403]) {
+    let route
+    let checked = 0
+    const connection = { requestRejection(req) { checked += 1; assert.strictEqual(req.method, 'POST'); return rejection } }
+    const services = {
+      shell: { resolve() { throw new Error('不能执行 Git') } },
+      tools: { register() {} },
+      webServer: { register(definition) { route = definition } },
+      connection,
+    }
+    plugin.apply({ get: (key) => services[key], inject: (_deps, callback) => callback({ get: (key) => services[key] }) })
+    const response = await callHttp(route.handler, { action: 'stage-all', sessionId: 'untrusted', operationId: 'denied' })
+    assert.strictEqual(response.status, rejection)
+    assert.strictEqual(response.body.ok, false)
+    assert.strictEqual(checked, 1)
+  }
+})
+
+test('认证服务缺失时 Web 操作失败关闭', async () => {
+  let route
+  plugin.apply({ get: (key) => key === 'webServer' ? { register(definition) { route = definition } } : null })
+  const response = await callHttp(route.handler, { action: 'state', sessionId: 'test' })
+  assert.strictEqual(response.status, 503)
+})
+
+test('无 Agent 的已加载会话仍可读取仓库并应用会话沙箱', async () => {
+  let route
+  let resolvedSession
+  let capturedSpec
+  const session = { header: { cwd: '/tmp/session-repo' } }
+  const services = {
+    tools: { register() {} },
+    shell: { resolve: (spec) => { capturedSpec = spec; return spec }, run: async () => ({ exitCode: 1, stdout: { text: '' }, stderr: { text: '' } }) },
+    agents: { get: () => undefined },
+    sessions: { get: () => session },
+    sandboxPolicy: { resolve({ session }) { resolvedSession = session; return { mode: 'read-only', workspaceRoot: session.header.cwd } } },
+    connection: { requestRejection: () => undefined },
+    webServer: { register(definition) { route = definition } },
+  }
+  plugin.apply({ get: (key) => services[key], inject: (_deps, callback) => callback({ get: (key) => services[key] }) })
+  const result = await callHttp(route.handler, { action: 'get-summary', sessionId: 'idle-session' })
+  assert.notStrictEqual(result.body.code, 'SESSION_NOT_FOUND')
+  assert.strictEqual(resolvedSession, session)
+  assert.strictEqual(capturedSpec.workdir, '/tmp/session-repo')
+  assert.strictEqual(capturedSpec.sandboxPolicy.mode, 'read-only')
+})
+
+test('冷会话从观察快照恢复工作目录和沙箱模式并释放观察句柄', async () => {
+  let route
+  let released = 0
+  let capturedSpec
+  let mode
+  const services = {
+    tools: { register() {} },
+    shell: { resolve: (spec) => { capturedSpec = spec; return spec }, run: async () => ({ exitCode: 1, stdout: { text: '' }, stderr: { text: '' } }) },
+    agents: { get: () => undefined },
+    sessions: { get: () => undefined },
+    sessionQuery: { observeSession: async (id) => {
+      if (id === 'missing') throw new Error('session not found')
+      return { header: { cwd: '/tmp/cold-repo' }, projections: { values: { sandboxMode: 'read-only' } }, [Symbol.dispose]() { released += 1 } }
+    } },
+    sandboxPolicy: { resolve(request) { mode = request.mode; return { mode: request.mode, workspaceRoot: '/wrong-default' } } },
+    connection: { requestRejection: () => undefined },
+    webServer: { register(definition) { route = definition } },
+  }
+  plugin.apply({ get: (key) => services[key], inject: (_deps, callback) => callback({ get: (key) => services[key] }) })
+  const result = await callHttp(route.handler, { action: 'get-summary', sessionId: 'cold-session' })
+  assert.notStrictEqual(result.body.code, 'SESSION_NOT_FOUND')
+  assert.strictEqual(mode, 'read-only')
+  assert.strictEqual(capturedSpec.workdir, '/tmp/cold-repo')
+  assert.deepStrictEqual(capturedSpec.sandboxPolicy, { mode: 'read-only', workspaceRoot: '/tmp/cold-repo', sessionId: 'cold-session' })
+  assert.strictEqual(released, 1)
+  const missing = await callHttp(route.handler, { action: 'get-summary', sessionId: 'missing' })
+  assert.strictEqual(missing.body.code, 'SESSION_NOT_FOUND')
 })

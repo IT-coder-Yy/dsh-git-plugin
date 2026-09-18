@@ -38,33 +38,6 @@ export interface CommitGraphRow {
     laneCount: number;
     edges: CommitGraphEdge[];
 }
-export interface HostSplitLayout {
-    frame: HTMLElement;
-    sidebar: HTMLElement;
-    center: HTMLElement;
-    details: HTMLElement;
-}
-export interface ActiveHostSplit {
-    layout: HostSplitLayout;
-    splitColumns: string;
-    previousGridTemplateColumns: string;
-    previousTrack: string;
-    previousDetailsWidth: string;
-    previousDetailsMinWidth: string;
-    previousDetailsMaxWidth: string;
-    previousDetailsBorderLeft: string;
-}
-export interface ResizeDrag {
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-    currentRatio: number;
-}
-export declare const WORKBENCH_RATIO_KEY = "dsh-easygit-plugin:workbench-ratio";
-export declare const WORKBENCH_TRACK = "--dsh-easygit-plugin-workbench-width";
-export declare const WORKBENCH_DEFAULT_RATIO = 0.36;
-export declare const WORKBENCH_MIN_RATIO = 0.24;
-export declare const WORKBENCH_MAX_RATIO = 0.75;
 export declare function appendCommandLog(current: CommandLogEntry[], entry: CommandLogEntry): CommandLogEntry[];
 export declare function filterLocalBranches(branches: BranchSummary[], query: string): BranchSummary[];
 export declare function isCurrentCommitRequest(selectedHash: string, requestedHash: string, currentSequence: number, requestSequence: number): boolean;
@@ -82,10 +55,6 @@ export declare function isTrackedRequestCurrent(ref: {
 }, request: TrackedRequest): boolean;
 export declare function isAbortError(error: unknown): boolean;
 export declare function deriveCommitGraph(commits: CommitSummary[]): CommitGraphRow[];
-export declare function clampWorkbenchRatio(value: number): number;
-export declare function readWorkbenchRatio(): number;
-export declare function persistWorkbenchRatio(value: number | null): void;
-export declare function workbenchTrackForRatio(ratio: number): string;
 export declare function repositoryName(topLevel: unknown): string;
 export declare function mutationCommand(action: string, payload?: AnyRecord): {
     label: string;
@@ -102,9 +71,6 @@ export declare function pendingProposalTransition(previousProposalId: string | n
     shouldOpen: boolean;
 };
 export declare function openRecoveryProposal(response: unknown, open: () => void, schedule?: (callback: () => void, delayMs: number) => unknown): boolean;
-export declare function viewportWidth(): number;
-export declare function sidebarTrackWidth(layout: HostSplitLayout): number;
-export declare function findWorkbenchHostSplit(anchor: HTMLElement): HostSplitLayout | null;
 export declare function buildFileTree(files: RepositoryFile[]): FileTreeNode;
 export declare function parseReviewRows(diff: string): ReviewRow[];
 export declare function diffLineClass(line: string): string;

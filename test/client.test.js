@@ -26,78 +26,56 @@ function loadClientPlugin() {
   return clientPlugin
 }
 
-test('Client 注册输入框工具栏动作与 details 生命周期', () => {
+test('Client 注册原生右栏标签、工具栏入口并释放类型', async () => {
   const clientPlugin = loadClientPlugin()
-  assert.deepStrictEqual(clientPlugin.inject, ['slots', 'timer', 'layout', 'connection'])
-
-  const injections = []
-  const registered = []
-  const slots = {
-    inject(name, callback) {
-      injections.push(name)
-      return callback()
+  assert.deepStrictEqual(clientPlugin.inject, ['slots', 'timer', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'conversation'])
+  const registrations = []
+  const types = []
+  const releases = []
+  const opened = []
+  const sent = []
+  let released = false
+  let closed = 0
+  const services = {
+    slots: {
+      inject: (_name, callback) => callback(),
+      register(definition, renderer) { registrations.push({ definition, renderer }); return () => {} },
     },
-    register(definition, renderer) {
-      registered.push({ definition, renderer })
-      return () => {}
-    },
+    timer: { interval: () => () => {}, timeout: () => () => {} },
+    sidebarRightTabs: { register(definition) { types.push(definition); return () => { released = true } } },
+    sidebarRight: { openTabIn: (...args) => opened.push(args) },
+    sessions: { scope: (id) => ({ conversation: { send: async (text) => { sent.push([id, text]) } } }) },
   }
-  const timer = { interval: () => () => {}, timeout: () => () => {} }
-  const layout = { openDetails() {}, closeDetails() {} }
-  clientPlugin.apply({
-    get: (key) => key === 'slots' ? slots : key === 'timer' ? timer : key === 'layout' ? layout : undefined,
-    effect: (callback) => callback(),
-    timer,
-  })
-
-  assert.deepStrictEqual(injections, ['details', 'conversation.input.left'])
-  assert.strictEqual(registered.length, 1)
-  assert.deepStrictEqual(registered[0].definition, {
-    name: 'conversation.input.left', id: 'git-workbench', order: 30, label: 'Git 工作台',
-  })
-  assert.strictEqual(typeof registered[0].renderer, 'function')
+  clientPlugin.apply({ get: (key) => services[key], effect: (callback) => { releases.push(callback()) } })
+  assert.strictEqual(types[0].id, 'dsh-easygit-plugin')
+  assert.strictEqual(types[0].kind, 'easygit')
+  assert.strictEqual(types[0].title(), 'Git 工作台')
+  const body = registrations.find(({ definition }) => definition.name === 'sidebar.right.pane.tab')
+  assert.strictEqual(body.definition.key, types[0].id)
+  assert.ok(!registrations.some(({ definition }) => definition.name === 'details'))
+  const toolbar = registrations.find(({ definition }) => definition.name === 'conversation.input.left')
+  const action = toolbar.renderer({ sessionId: 'session-a' })
+  action.args[1].openWorkbench('session-a')
+  action.args[1].openWorkbench('session-b')
+  assert.deepStrictEqual(opened, [['session-a', 'easygit'], ['session-b', 'easygit']])
+  assert.throws(() => action.args[1].openWorkbench(''), /当前会话不可用/)
+  const tab = { visible: true, actions: { close: () => { closed += 1 } } }
+  const panel = body.renderer({ sessionId: 'session-b', useTabInfo: () => ({ tab }) })
+  assert.strictEqual(panel.args[1].sessionId, 'session-b')
+  panel.args[1].close()
+  assert.strictEqual(closed, 1)
+  await panel.args[1].sendPrompt('分析 Git 失败')
+  assert.deepStrictEqual(sent, [['session-b', '分析 Git 失败']])
+  tab.visible = false
+  assert.strictEqual(body.renderer({ sessionId: 'session-b', useTabInfo: () => ({ tab }) }), null)
+  for (const release of releases) if (typeof release === 'function') release()
+  assert.strictEqual(released, true)
 })
 
-test('Panel Controller 用临时低优先级 details 注册打开，并在关闭和声明卸载时释放', () => {
-  const clientPlugin = loadClientPlugin()
-  const registrations = []
-  const layoutCalls = []
-  let releaseCount = 0
-  const slots = {
-    register(definition, renderer) {
-      registrations.push({ definition, renderer })
-      return () => { releaseCount += 1 }
-    },
-  }
-  const layout = {
-    openDetails() { layoutCalls.push('open') },
-    closeDetails() { layoutCalls.push('close') },
-  }
-  const controller = clientPlugin.__testing.createPanelController({
-    slots,
-    layout,
-    renderPanel: (props) => ({ panelFor: props.sessionId }),
-  })
-
-  const detachDetails = controller.attachDetails()
-  assert.strictEqual(controller.open('session-a'), true)
-  assert.strictEqual(controller.isOpen('session-a'), true)
-  assert.deepStrictEqual(registrations[0].definition, { name: 'details', priority: -10 })
-  assert.deepStrictEqual(registrations[0].renderer({ sessionId: 'session-a' }), { panelFor: 'session-a' })
-  assert.strictEqual(registrations[0].renderer({ sessionId: 'session-b' }), null, '切换会话时不得渲染上一会话的工作台')
-  assert.deepStrictEqual(layoutCalls, ['open'])
-
-  assert.strictEqual(controller.toggle('session-a'), true)
-  assert.strictEqual(controller.isOpen('session-a'), false)
-  assert.deepStrictEqual(layoutCalls, ['open', 'close'])
-  assert.strictEqual(releaseCount, 1)
-
-  assert.strictEqual(controller.open('session-b'), true)
-  detachDetails()
-  assert.strictEqual(controller.snapshot().detailsReady, false)
-  assert.strictEqual(controller.snapshot().open, false)
-  assert.strictEqual(releaseCount, 2)
-  assert.deepStrictEqual(layoutCalls, ['open', 'close', 'open', 'close'])
+test('Agent 分析通过指定会话发送并传播会话缺失及业务错误', async () => {
+  const { requestAgentAnalysis } = loadClientPlugin().__testing
+  await assert.rejects(requestAgentAnalysis({ scope: () => undefined }, 'missing', '分析'), /当前会话不可用/)
+  await assert.rejects(requestAgentAnalysis({ scope: () => ({ conversation: { send: async () => { throw new Error('admission denied') } } }) }, 'session-a', '分析'), /admission denied/)
 })
 
 test('变更文件按目录树归类，并保留根目录文件', () => {
@@ -238,13 +216,17 @@ test('工作台标题线、命令日志高度和变更页双栏边界使用修�
   assert.doesNotMatch(styleTag.textContent, /\.gg-diff \{ min-height: 100%; \}/)
 })
 
-test('工作台宽度比例限制在 24% 到 75%', () => {
+test('工作台使用原生容器宽高，不修改宿主列布局或隐藏其他面板', () => {
   const clientPlugin = loadClientPlugin()
-  const clamp = clientPlugin.__testing.clampWorkbenchRatio
-
-  assert.strictEqual(clamp(0.1), 0.24)
-  assert.strictEqual(clamp(0.36), 0.36)
-  assert.strictEqual(clamp(0.9), 0.75)
+  let styleTag
+  global.document = {
+    getElementById: () => null,
+    createElement: () => { styleTag = { textContent: '', remove() {} }; return styleTag },
+    head: { appendChild() {} },
+  }
+  try { clientPlugin.__testing.injectStyles() } finally { delete global.document }
+  assert.match(styleTag.textContent, /\.gg-workbench \{[^}]*position: relative;[^}]*width: 100%; height: 100%;/)
+  assert.doesNotMatch(styleTag.textContent, /data-easygit-workbench|data-side=|gg-workbench-resize/)
 })
 
 test('本地分支搜索忽略大小写和首尾空格', () => {

@@ -11,6 +11,9 @@ export interface WebServerService {
         handler(req: IncomingMessage, res: ServerResponse): Promise<void>;
     }): unknown;
 }
+export interface ConnectionService {
+    requestRejection(request: IncomingMessage): 401 | 403 | undefined;
+}
 interface ProposalVerification {
     changed: boolean;
     verified: boolean;
@@ -26,7 +29,7 @@ interface EasyGitActionDependencies {
     repository: GitRepositoryService;
     proposalStorageReady: Promise<void>;
     shell: ShellService | null;
-    repositoryContext(sessionId: string): RepositoryContext | null;
+    repositoryContext(sessionId: string): Promise<RepositoryContext | null>;
     latestPending(sessionId: string): StoredProposal | null;
     findProposal(sessionId: string, proposalId: unknown): StoredProposal | undefined;
     proposalView(proposal: StoredProposal): ProposalView;
@@ -36,8 +39,8 @@ interface EasyGitActionDependencies {
     verifyProposal(shell: ShellService | null, proposal: StoredProposal): Promise<ProposalVerification>;
     executeProposal(shell: ShellService | null, proposal: StoredProposal, policy: unknown, persist: () => Promise<void>): Promise<UnknownRecord>;
     recoverFailedCommand(sessionId: string, workdir: string, operationId: string, action: string, command: string, message: string, errorOutput: string, errorCode: string, reason: string): Promise<UnknownRecord | null>;
-    resolveExecutionPolicy(sessionId: string): unknown;
+    resolveExecutionPolicy(sessionId: string): Promise<unknown>;
 }
 /** Register the Client-to-Host POST dispatcher with a 1 MiB body limit. */
-export declare function registerEasyGitActions(webServer: WebServerService | null, dependencies: EasyGitActionDependencies): unknown;
+export declare function registerEasyGitActions(webServer: WebServerService | null, dependencies: EasyGitActionDependencies, connection: ConnectionService | null): unknown;
 export {};

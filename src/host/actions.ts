@@ -14,6 +14,10 @@ export interface WebServerService {
   }): unknown
 }
 
+export interface ConnectionService {
+  requestRejection(request: IncomingMessage): 401 | 403 | undefined
+}
+
 interface ProposalVerification {
   changed: boolean
   verified: boolean
@@ -31,7 +35,7 @@ interface EasyGitActionDependencies {
   repository: GitRepositoryService
   proposalStorageReady: Promise<void>
   shell: ShellService | null
-  repositoryContext(sessionId: string): RepositoryContext | null
+  repositoryContext(sessionId: string): Promise<RepositoryContext | null>
   latestPending(sessionId: string): StoredProposal | null
   findProposal(sessionId: string, proposalId: unknown): StoredProposal | undefined
   proposalView(proposal: StoredProposal): ProposalView
@@ -51,7 +55,7 @@ interface EasyGitActionDependencies {
     errorCode: string,
     reason: string,
   ): Promise<UnknownRecord | null>
-  resolveExecutionPolicy(sessionId: string): unknown
+  resolveExecutionPolicy(sessionId: string): Promise<unknown>
 }
 
 const REPOSITORY_ACTIONS = [
@@ -301,7 +305,7 @@ async function dispatchProposalAction(
     const result = await dependencies.executeProposal(
       dependencies.shell,
       proposal,
-      dependencies.resolveExecutionPolicy(sessionId),
+      await dependencies.resolveExecutionPolicy(sessionId),
       () => dependencies.flushProposal(sessionId),
     )
     console.log('easygit HTTP execute', proposal.proposalId, 'ok=', result.ok)
@@ -312,12 +316,15 @@ async function dispatchProposalAction(
 }
 
 /** Register the Client-to-Host POST dispatcher with a 1 MiB body limit. */
-export function registerEasyGitActions(webServer: WebServerService | null, dependencies: EasyGitActionDependencies): unknown {
+export function registerEasyGitActions(webServer: WebServerService | null, dependencies: EasyGitActionDependencies, connection: ConnectionService | null): unknown {
   if (!webServer) return undefined
   return webServer.register({
     kind: 'prefix',
     path: '/easygit',
     handler: async (req, res) => {
+      if (!connection) { sendJson(res, 503, { ok: false, error: 'connection service unavailable' }); return }
+      const rejection = connection.requestRejection(req)
+      if (rejection !== undefined) { sendJson(res, rejection, { ok: false, error: rejection === 401 ? 'unauthorized' : 'forbidden' }); return }
       if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'method not allowed' }); return }
       if (req.headers?.['sec-fetch-site'] === 'cross-site') { sendJson(res, 403, { ok: false, error: 'cross-site request denied' }); return }
       const contentType = req.headers?.['content-type']
@@ -342,7 +349,7 @@ export function registerEasyGitActions(webServer: WebServerService | null, depen
       try {
         await dependencies.proposalStorageReady
         if (isRepositoryAction(action)) {
-          const context = dependencies.repositoryContext(sessionId)
+          const context = await dependencies.repositoryContext(sessionId)
           const result = await dispatchRepositoryAction(action, sessionId, body, context, dependencies)
           sendJson(res, 200, await attachRepositoryRecovery(action, sessionId, body, result, context, dependencies))
           return

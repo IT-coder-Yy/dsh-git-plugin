@@ -361,7 +361,7 @@ test('结构化仓库 Action 受会话工作目录约束，并对 operationId �
         if (key === 'agents') return { get: (id) => { agentLookups += 1; return id === 'workbench-session' ? { session } : undefined } }
         return null
       },
-      inject: (_deps, callback) => callback({ get: () => ({ register: (definition) => { route = definition } }) }),
+      inject: (_deps, callback) => callback({ get: (key) => key === 'connection' ? { requestRejection: () => undefined } : { register: (definition) => { route = definition } } }),
     })
 
     const summary = await callHttp(route.handler, { action: 'get-summary', sessionId: 'workbench-session' })
@@ -597,7 +597,7 @@ test('只读贮藏列表按最新顺序返回并保持仓库状态', async () =>
         if (key === 'agents') return { get: (id) => id === 'stash-session' ? { session } : undefined }
         return null
       },
-      inject: (_deps, callback) => callback({ get: () => ({ register: (definition) => { route = definition } }) }),
+      inject: (_deps, callback) => callback({ get: (key) => key === 'connection' ? { requestRejection: () => undefined } : { register: (definition) => { route = definition } } }),
     })
 
     const empty = await callHttp(route.handler, { action: 'get-stashes', sessionId: 'stash-session' })

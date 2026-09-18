@@ -55,37 +55,6 @@ export interface CommitGraphRow {
   edges: CommitGraphEdge[]
 }
 
-export interface HostSplitLayout {
-  frame: HTMLElement
-  sidebar: HTMLElement
-  center: HTMLElement
-  details: HTMLElement
-}
-
-export interface ActiveHostSplit {
-  layout: HostSplitLayout
-  splitColumns: string
-  previousGridTemplateColumns: string
-  previousTrack: string
-  previousDetailsWidth: string
-  previousDetailsMinWidth: string
-  previousDetailsMaxWidth: string
-  previousDetailsBorderLeft: string
-}
-
-export interface ResizeDrag {
-  pointerId: number
-  startX: number
-  startWidth: number
-  currentRatio: number
-}
-
-export const WORKBENCH_RATIO_KEY = 'dsh-easygit-plugin:workbench-ratio'
-export const WORKBENCH_TRACK = '--dsh-easygit-plugin-workbench-width'
-export const WORKBENCH_DEFAULT_RATIO = 0.36
-export const WORKBENCH_MIN_RATIO = 0.24
-export const WORKBENCH_MAX_RATIO = 0.75
-
 export function appendCommandLog(current: CommandLogEntry[], entry: CommandLogEntry): CommandLogEntry[] {
   return [...current, entry].slice(-100)
 }
@@ -170,34 +139,6 @@ export function deriveCommitGraph(commits: CommitSummary[]): CommitGraphRow[] {
     lanes = after
     return row
   })
-}
-
-export function clampWorkbenchRatio(value: number): number {
-  return Math.min(WORKBENCH_MAX_RATIO, Math.max(WORKBENCH_MIN_RATIO, value))
-}
-
-export function readWorkbenchRatio(): number {
-  if (typeof window === 'undefined' || !window.localStorage) return WORKBENCH_DEFAULT_RATIO
-  try {
-    const value = Number(window.localStorage.getItem(WORKBENCH_RATIO_KEY))
-    return Number.isFinite(value) && value > 0 ? clampWorkbenchRatio(value) : WORKBENCH_DEFAULT_RATIO
-  } catch (error) {
-    return WORKBENCH_DEFAULT_RATIO
-  }
-}
-
-export function persistWorkbenchRatio(value: number | null): void {
-  if (typeof window === 'undefined' || !window.localStorage) return
-  try {
-    if (value === null) window.localStorage.removeItem(WORKBENCH_RATIO_KEY)
-    else window.localStorage.setItem(WORKBENCH_RATIO_KEY, String(value))
-  } catch (error) {
-    // Storage can be unavailable in privacy-restricted browser contexts.
-  }
-}
-
-export function workbenchTrackForRatio(ratio: number): string {
-  return `${Number((ratio * 100).toFixed(2))}vw`
 }
 
 export function repositoryName(topLevel: unknown): string {
@@ -305,34 +246,6 @@ export function openRecoveryProposal(
   if (schedule) schedule(open, 1000)
   else open()
   return true
-}
-
-export function viewportWidth(): number {
-  return typeof window === 'undefined' ? 0 : Math.max(1, window.innerWidth)
-}
-
-export function sidebarTrackWidth(layout: HostSplitLayout): number {
-  const rectWidth = layout.sidebar.getBoundingClientRect().width
-  if (rectWidth > 0) return rectWidth
-  const styleWidth = Number.parseFloat(window.getComputedStyle(layout.sidebar).width)
-  return Number.isFinite(styleWidth) ? styleWidth : 0
-}
-
-export function findWorkbenchHostSplit(anchor: HTMLElement): HostSplitLayout | null {
-  if (typeof window === 'undefined') return null
-  const detailsRoot = anchor.closest("[data-side='details']")
-  let directChild = detailsRoot instanceof HTMLElement ? detailsRoot : anchor
-  for (let candidate = directChild.parentElement; candidate; candidate = candidate.parentElement) {
-    if (window.getComputedStyle(candidate).display === 'grid') {
-      const children = Array.from(candidate.children).filter((child): child is HTMLElement => child instanceof HTMLElement)
-      const detailsIndex = children.indexOf(directChild)
-      const sidebar = children[0]
-      const center = children[detailsIndex - 1]
-      if (detailsIndex >= 2 && sidebar && center) return { frame: candidate, sidebar, center, details: directChild }
-    }
-    directChild = candidate
-  }
-  return null
 }
 
 export function buildFileTree(files: RepositoryFile[]): FileTreeNode {

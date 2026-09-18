@@ -9,7 +9,7 @@
  * are only available through the Client action route.
  */
 
-import { registerEasyGitActions, type WebServerService } from './actions'
+import { registerEasyGitActions, type WebServerService, type ConnectionService } from './actions'
 import type { GitFailureContext } from '../shared/contracts'
 import {
   ProposalService,
@@ -74,9 +74,23 @@ interface AgentRegistryLike {
   get(sessionId: string): AgentLike | undefined
 }
 
+interface SessionRegistryLike {
+  get(sessionId: string): SessionLike | undefined
+}
+
+type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+interface SessionQueryLike {
+  observeSession(sessionId: string): Promise<{
+    header: { cwd?: string }
+    projections?: { values: { sandboxMode?: SandboxMode | null } }
+    [Symbol.dispose](): void
+  }>
+}
+
 interface SandboxPolicyService {
   workspaceRoot?: string
-  resolve(input: { session?: SessionLike }): unknown
+  resolve(input: { session?: SessionLike; mode?: SandboxMode }): Record<string, unknown>
 }
 
 interface StorageBackendLike {
@@ -160,16 +174,32 @@ function sessionWorkdir(exec: ToolExecutionContext | undefined, args: UnknownRec
   return undefined
 }
 
-function repositoryContextForSession(ctx: HostContext, sandboxPolicy: SandboxPolicyService | null, sessionId: string): { workdir: string; policy: unknown } | null {
+async function repositoryContextForSession(ctx: HostContext, sandboxPolicy: SandboxPolicyService | null, sessionId: string): Promise<{ workdir: string; policy: unknown } | null> {
   try {
     const agents = ctx.get<AgentRegistryLike | null>('agents')
     const agent = agents && agents.get(sessionId)
-    if (!agent) return null
-    const workdir = sessionWorkdir({ agent }, {}, ctx)
-    if (!workdir) return null
-    const policy = sandboxPolicy ? sandboxPolicy.resolve({ session: agent.session }) : undefined
-    return { workdir, policy }
-  } catch (e) {
+    const session = agent?.session ?? ctx.get<SessionRegistryLike | null>('sessions')?.get(sessionId)
+    if (session) {
+      const workdir = sessionWorkdir({ agent: { session } }, {}, ctx)
+      if (!workdir) return null
+      return { workdir, policy: sandboxPolicy?.resolve({ session }) }
+    }
+    // Cold sessions need no Agent turn: observe their persisted header and policy.
+    const query = ctx.get<SessionQueryLike | null>('sessionQuery')
+    if (!query) return null
+    const observation = await query.observeSession(sessionId)
+    try {
+      const workdir = observation.header.cwd
+      if (!workdir || !observation.projections) return null
+      const mode = observation.projections.values.sandboxMode ?? undefined
+      const policy = sandboxPolicy
+        ? { ...sandboxPolicy.resolve({ mode }), workspaceRoot: workdir, sessionId }
+        : undefined
+      return { workdir, policy }
+    } finally {
+      observation[Symbol.dispose]()
+    }
+  } catch (error) {
     return null
   }
 }
@@ -832,7 +862,7 @@ const plugin = {
       })
     }
 
-    const registerWebServer = (webServer: WebServerService | null): unknown => registerEasyGitActions(webServer, {
+    const registerWebServer = (webServer: WebServerService | null, connection: ConnectionService | null): unknown => registerEasyGitActions(webServer, {
       repository,
       proposalStorageReady,
       shell,
@@ -848,16 +878,16 @@ const plugin = {
       recoverFailedCommand: (sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason) => recoverFailedCommand(
         shell, sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason,
       ),
-      resolveExecutionPolicy: (sessionId) => {
-        const agents = ctx.get<AgentRegistryLike | null>('agents')
-        const agent = agents ? agents.get(sessionId) : undefined
-        return sandboxPolicy ? sandboxPolicy.resolve({ session: agent?.session }) : undefined
+      resolveExecutionPolicy: async (sessionId) => {
+        const context = await repositoryContextForSession(ctx, sandboxPolicy, sessionId)
+        if (!context) throw new Error('无法确定当前会话的仓库目录')
+        return context.policy
       },
-    })
+    }, connection)
     if (typeof ctx.inject === 'function') {
-      ctx.inject(['webServer'], (webCtx) => registerWebServer(webCtx.get<WebServerService | null>('webServer')))
+      ctx.inject(['webServer', 'connection'], (webCtx) => registerWebServer(webCtx.get<WebServerService | null>('webServer'), webCtx.get<ConnectionService | null>('connection')))
     } else {
-      registerWebServer(ctx.get<WebServerService | null>('webServer'))
+      registerWebServer(ctx.get<WebServerService | null>('webServer'), ctx.get<ConnectionService | null>('connection'))
     }
   },
 }
