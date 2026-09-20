@@ -63,6 +63,20 @@ dsh web
 
 Use the Git button beside the composer to inspect changes, review commit history, stage files, commit changes, manage branches, or synchronize with a remote. Rebase and forceful branch deletion require an explicit risk confirmation.
 
+### Branch merging
+
+Open **Git workbench → 合并分支 (Merge branches)**, select a local or fetched remote branch, and preview incoming commits and file changes before merging into the current local branch.
+
+- **Normal**: fast-forward when possible; otherwise create a merge commit.
+- **Fast-forward only**: reject diverged histories without creating a merge commit.
+- **Squash**: stage the combined changes, then finish with a single-parent commit or abort.
+
+Conflicts open the existing three-way editor. Save and mark each file resolved, then continue or explicitly confirm an abort. Pending merges can also be finished or aborted from the merge tab. Completed merges cannot be undone with abort. A clean worktree is required, and changed branch tips invalidate the preview.
+
+The diff shows source changes since the common ancestor, not the final merge result or a conflict prediction. Preview limits are 200 commits, 500 files, and 180,000 diff characters, with truncation notices. Unrelated histories are rejected. Remote branches use locally fetched references; fetch updates from Sync first if needed.
+
+Verified in an isolated Harness browser instance with real Git repositories: all three merge modes, normal/squash conflict resolution and abort, remote sources, colliding reference names, and stale-preview rejection. The full check passes 130 tests and 30 reproducible build artifacts.
+
 ### Conflict resolution
 
 Open **Git workbench → 冲突解决 (Conflict resolution)**, also linked from Changes and Sync:
