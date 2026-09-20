@@ -712,6 +712,99 @@ test('快速切换贮藏时旧详情不能覆盖当前选择', async () => {
 
 function mergeHarness(rpc) { return stashHarness(rpc, 'GitMergeTab') }
 
+test('提交修正预填完整说明，要求确认，携带快照并防止双击重复执行', async () => {
+  const state = { head: 'a'.repeat(40), branch: 'main', message: '标题\n\n正文', parents: ['b'.repeat(40)], token: 'snapshot', staged: true, dirty: true, blocked: false }
+  const ui = stashHarness(async request => request.action === 'get-commit-edit-state'
+    ? { ok: true, data: state } : { ok: true, data: { operation: null, files: [] } }, 'GitCommitActions')
+  await ui.render(); await ui.render()
+  ui.button('修改最近提交说明').args[1].onClick()
+  await ui.render()
+  const input = ui.nodes().find(node => node.args[1]?.['aria-label'] === '新的提交说明')
+  assert.equal(input.args[1].value, state.message)
+  assert.equal(ui.button('确认修改最近提交说明').args[1].disabled, true)
+  input.args[1].onChange({ currentTarget: { value: 'new\n\nbody' } })
+  ui.nodes().find(node => node.args[1]?.type === 'checkbox').args[1].onChange({ currentTarget: { checked: true } })
+  await ui.render()
+  ui.button('确认修改最近提交说明').args[1].onClick()
+  ui.button('确认修改最近提交说明').args[1].onClick()
+  await ui.render(); await ui.render()
+  const requests = ui.requests.filter(request => request.action === 'amend-message')
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].message, 'new\n\nbody')
+  assert.equal(requests[0].token, state.token)
+  assert.equal(requests[0].confirmRisk, true)
+  assert.equal(ui.nodes().find(node => node.args[1]?.role === 'status').args[1].className, 'gg-idletext')
+  ui.cleanup()
+})
+
+test('历史合并提交只提供 Revert，主线选择必填，冲突后切换到解决页', async () => {
+  const state = { head: 'a'.repeat(40), branch: 'main', parents: [], token: 'snapshot', dirty: false, blocked: false }
+  let conflicts = 0
+  const ui = stashHarness(async request => request.action === 'get-commit-edit-state'
+    ? { ok: true, data: state } : { ok: true, data: { operation: 'revert', files: [{ path: 'a.txt' }] } }, 'GitCommitActions')
+  ui.props.hash = 'b'.repeat(40)
+  ui.props.parents = ['c'.repeat(40), 'd'.repeat(40)]
+  ui.props.onConflicts = () => { conflicts++ }
+  await ui.render(); await ui.render()
+  assert.equal(ui.button('修改最近提交说明'), undefined)
+  ui.button('Revert 此提交').args[1].onClick()
+  await ui.render()
+  const check = () => ui.nodes().find(node => node.args[1]?.type === 'checkbox').args[1].onChange({ currentTarget: { checked: true } })
+  check(); await ui.render()
+  assert.equal(ui.button('确认Revert 此提交').args[1].disabled, true)
+  ui.nodes().find(node => node.args[1]?.['aria-label'] === '主线父提交').args[1].onChange({ currentTarget: { value: '2' } })
+  await ui.render()
+  assert.equal(ui.button('确认Revert 此提交').args[1].disabled, true)
+  check(); await ui.render()
+  assert.equal(ui.button('确认Revert 此提交').args[1].disabled, false)
+  ui.button('确认Revert 此提交').args[1].onClick()
+  await ui.render(); await ui.render()
+  const request = ui.requests.find(request => request.action === 'revert-commit')
+  assert.equal(request.hash, ui.props.hash)
+  assert.equal(request.mainline, 2)
+  assert.equal(conflicts, 1)
+  ui.cleanup()
+})
+
+test('根提交禁用 soft 撤销，无暂存改动禁用补充，脏工作区禁用 Revert', async () => {
+  const state = { head: 'a'.repeat(40), branch: 'main', message: 'root', parents: [], token: 'snapshot', staged: false, dirty: true, blocked: false }
+  const ui = stashHarness(async () => ({ ok: true, data: state }), 'GitCommitActions')
+  ui.props.hash = state.head
+  await ui.render(); await ui.render()
+  assert.equal(ui.button('撤销最近提交但保留修改').args[1].disabled, true)
+  assert.equal(ui.button('补充最近提交').args[1].disabled, true)
+  assert.equal(ui.button('Revert 此提交').args[1].disabled, true)
+  assert.equal(ui.button('修改最近提交说明').args[1].disabled, false)
+  ui.cleanup()
+})
+
+test('提交操作刷新忽略旧响应，失败显示诊断并重置确认', async () => {
+  let resolveOld
+  let reads = 0
+  const state = { head: 'a'.repeat(40), branch: 'main', message: 'message', parents: ['b'.repeat(40)], token: 'new', staged: true, blocked: false }
+  const ui = stashHarness(async request => {
+    if (request.action === 'get-commit-edit-state') {
+      if (++reads === 1) return new Promise(resolve => { resolveOld = resolve })
+      return { ok: true, data: state }
+    }
+    return { ok: false, code: 'STATE_CONFLICT', message: '暂存区已变化', diagnostics: 'diagnostic details' }
+  }, 'GitCommitActions')
+  await ui.render()
+  ui.button('刷新操作状态').args[1].onClick()
+  await ui.render(); await ui.render()
+  resolveOld({ ok: true, data: { ...state, token: 'old', head: 'c'.repeat(40) } })
+  await ui.render()
+  ui.button('补充最近提交').args[1].onClick(); await ui.render()
+  ui.nodes().find(node => node.args[1]?.type === 'checkbox').args[1].onChange({ currentTarget: { checked: true } })
+  await ui.render()
+  ui.button('确认补充最近提交').args[1].onClick(); await ui.render(); await ui.render()
+  assert.equal(ui.requests.find(request => request.action === 'amend-commit').token, 'new')
+  assert.ok(ui.nodes().some(node => node.args[2] === '暂存区已变化\ndiagnostic details'))
+  assert.equal(ui.nodes().find(node => node.args[1]?.role === 'status').args[1].className, 'gg-workbench-error')
+  assert.equal(ui.button('确认补充最近提交'), undefined)
+  ui.cleanup()
+})
+
 test('合并界面要求有效预览，拒绝过期响应，携带模式和快照并防止重复执行', async () => {
   let resolveOld
   const preview = { branch: 'main', target: 'refs/heads/incoming', head: 'a'.repeat(40), sourceHead: 'b'.repeat(40), token: 'snapshot', base: 'a'.repeat(40), canFastForward: false, alreadyMerged: false, commits: [{ hash: 'b'.repeat(40), subject: 'incoming', author: 'test' }], files: ['a.txt'], diff: '+incoming', commitsTruncated: false, filesTruncated: false, diffTruncated: false }
