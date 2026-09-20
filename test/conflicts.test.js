@@ -212,7 +212,9 @@ test('冲突接口复用会话定位和沙箱，忽略客户端工作目录', as
       queueMicrotask(() => { req.emit('data', Buffer.from(JSON.stringify(body))); req.emit('end') })
     })
     const request = { sessionId: 'conflict-http', workdir: '/does-not-exist' }
-    const start = await call({ ...request, action: 'start-operation', operationId: 'http-start', kind: 'merge', target: 'incoming', confirmRisk: true })
+    const preview = await call({ ...request, action: 'get-merge-preview', target: 'refs/heads/incoming' })
+    assert.equal(preview.ok, true, JSON.stringify(preview))
+    const start = await call({ ...request, action: 'merge-branch', operationId: 'http-start', target: preview.data.target, token: preview.data.token, mode: 'normal' })
     assert.equal(start.ok, true, JSON.stringify(start))
     const detail = await call({ ...request, action: 'get-conflict', path: 'a.txt' })
     assert.equal(detail.ok, true, JSON.stringify(detail)); assert.equal(detail.data.base.text, 'base\n')

@@ -572,7 +572,7 @@ test('三方冲突界面显示来源和行号，按块选择、保存后才标�
   }
 })
 
-function stashHarness(rpc) {
+function stashHarness(rpc, componentName = 'GitStashesTab') {
   const slots = []
   let cursor = 0
   let tree
@@ -595,7 +595,7 @@ function stashHarness(rpc) {
         pending.push(() => { previous?.cleanup?.(); slots[index] = { deps, cleanup: effect() } })
       }
     },
-  }).__testing.GitStashesTab
+  }).__testing[componentName]
   const requests = []
   const props = {
     sessionId: 'stash-ui', revision: 0, onChanged() {}, onConflicts() {}, onCommand: () => () => {},
@@ -707,5 +707,86 @@ test('快速切换贮藏时旧详情不能覆盖当前选择', async () => {
   assert.ok(ui.button('M · current.txt'))
   assert.ok(!ui.button('D · old.txt'))
   assert.equal(ui.requests.filter(request => request.action === 'get-stash-diff').length, 1)
+  ui.cleanup()
+})
+
+function mergeHarness(rpc) { return stashHarness(rpc, 'GitMergeTab') }
+
+test('合并界面要求有效预览，拒绝过期响应，携带模式和快照并防止重复执行', async () => {
+  let resolveOld
+  const preview = { branch: 'main', target: 'refs/heads/incoming', head: 'a'.repeat(40), sourceHead: 'b'.repeat(40), token: 'snapshot', base: 'a'.repeat(40), canFastForward: false, alreadyMerged: false, commits: [{ hash: 'b'.repeat(40), subject: 'incoming', author: 'test' }], files: ['a.txt'], diff: '+incoming', commitsTruncated: false, filesTruncated: false, diffTruncated: false }
+  const ui = mergeHarness(async request => {
+    if (request.action === 'get-branches') return { ok: true, data: { branches: [{ name: 'main', current: true }, { name: 'incoming', current: false }], remotes: [{ name: 'origin/incoming' }], tags: [] } }
+    if (request.action === 'get-conflicts') return { ok: true, data: { operation: null, files: [], operationToken: 'state' } }
+    if (request.action === 'get-merge-preview') {
+      if (request.target.startsWith('refs/remotes/')) return new Promise(resolve => { resolveOld = resolve })
+      return { ok: true, data: preview }
+    }
+    if (request.action === 'merge-branch') return { ok: true, data: { operation: 'merge', files: [{ path: 'a.txt' }], operationToken: 'merge' } }
+    throw Error(request.action)
+  })
+  let conflicts = 0
+  ui.props.onConflicts = () => { conflicts++ }
+  const select = label => ui.nodes().find(node => node.args[1]?.['aria-label'] === label)
+  await ui.render(); await ui.render()
+  assert.equal(ui.button('执行合并').args[1].disabled, true)
+  const source = select('源分支')
+  assert.ok(JSON.stringify(source).includes('refs/remotes/origin/incoming'))
+  assert.ok(!JSON.stringify(source).includes('refs/heads/main'))
+  source.args[1].onChange({ currentTarget: { value: 'refs/remotes/origin/incoming' } })
+  await ui.render()
+  ui.button('预览提交与差异').args[1].onClick()
+  await ui.render()
+  select('源分支').args[1].onChange({ currentTarget: { value: 'refs/heads/incoming' } })
+  await ui.render()
+  resolveOld({ ok: true, data: { ...preview, target: 'refs/remotes/origin/incoming' } })
+  await ui.render(); await ui.render()
+  assert.equal(ui.button('执行合并').args[1].disabled, true)
+  ui.button('预览提交与差异').args[1].onClick()
+  await ui.render(); await ui.render()
+  assert.equal(ui.button('执行合并').args[1].disabled, false)
+  select('合并方式').args[1].onChange({ currentTarget: { value: 'ff-only' } })
+  await ui.render()
+  assert.equal(ui.button('执行合并').args[1].disabled, true)
+  select('合并方式').args[1].onChange({ currentTarget: { value: 'squash' } })
+  await ui.render()
+  ui.button('执行合并').args[1].onClick()
+  ui.button('执行合并').args[1].onClick()
+  await ui.render(); await ui.render()
+  const mutations = ui.requests.filter(request => request.action === 'merge-branch')
+  assert.equal(mutations.length, 1)
+  assert.equal(mutations[0].mode, 'squash')
+  assert.equal(mutations[0].token, preview.token)
+  assert.equal(mutations[0].target, preview.target)
+  assert.equal(conflicts, 1)
+  ui.cleanup()
+})
+
+test('压缩合并可完成或中止，存在冲突时阻止完成，中止必须确认', async () => {
+  let conflicts = [{ path: 'a.txt' }]
+  const ui = mergeHarness(async request => {
+    if (request.action === 'get-branches') return { ok: true, data: { branches: [{ name: 'main', current: true }], remotes: [], tags: [] } }
+    if (request.action === 'get-conflicts') return { ok: true, data: { operation: 'merge', mergeMode: 'squash', files: conflicts, operationToken: 'squash-state' } }
+    if (request.action === 'finish-operation') return { ok: true, data: { operation: null, files: [], operationToken: 'done' } }
+    throw Error(request.action)
+  })
+  await ui.render(); await ui.render()
+  assert.equal(ui.button('完成合并').args[1].disabled, true)
+  assert.equal(ui.button('中止合并').args[1].disabled, true)
+  conflicts = []
+  ui.button('刷新').args[1].onClick()
+  await ui.render(); await ui.render()
+  assert.equal(ui.button('完成合并').args[1].disabled, false)
+  const checkbox = ui.nodes().find(node => node.args[0] === 'input' && node.args[1]?.type === 'checkbox')
+  checkbox.args[1].onChange({ currentTarget: { checked: true } })
+  await ui.render()
+  assert.equal(ui.button('中止合并').args[1].disabled, false)
+  ui.button('中止合并').args[1].onClick()
+  await ui.render(); await ui.render()
+  const request = ui.requests.find(request => request.action === 'finish-operation')
+  assert.equal(request.mode, 'abort')
+  assert.equal(request.token, 'squash-state')
+  assert.equal(request.confirmRisk, true)
+  assert.equal(ui.nodes().find(node => node.args[1]?.role === 'status').args[1].className, 'gg-idletext')
   ui.cleanup()
 })
