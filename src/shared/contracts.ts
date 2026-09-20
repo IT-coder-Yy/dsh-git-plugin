@@ -190,6 +190,23 @@ export interface StashSummary {
   date: string
 }
 
+export interface StashFile {
+  path: string
+  status: string
+  untracked: boolean
+}
+
+export interface StashDetail {
+  hash: string
+  files: StashFile[]
+  filesTruncated: boolean
+}
+
+export interface StashTarget {
+  selector: string
+  hash: string
+}
+
 export interface DiffResult {
   path: string | null
   staged: boolean
@@ -273,6 +290,13 @@ export interface EasyGitRequestMap {
   'get-commit-detail': { sessionId: string; hash: string }
   'get-commit-diff': { sessionId: string; hash: string }
   'get-stashes': { sessionId: string }
+  'get-stash-detail': { sessionId: string } & StashTarget
+  'get-stash-diff': { sessionId: string; path: string; untracked: boolean } & StashTarget
+  'create-stash': { sessionId: string; operationId: string; message: string; paths?: string[]; includeUntracked: boolean }
+  'apply-stash': { sessionId: string; operationId: string } & StashTarget
+  'pop-stash': { sessionId: string; operationId: string } & StashTarget
+  'drop-stash': { sessionId: string; operationId: string; confirmRisk: boolean } & StashTarget
+  'branch-stash': { sessionId: string; operationId: string; name: string } & StashTarget
   'get-sync-state': { sessionId: string }
   'stage-paths': { sessionId: string; operationId: string; paths: string[] }
   'unstage-paths': { sessionId: string; operationId: string; paths: string[] }
@@ -310,6 +334,13 @@ export interface EasyGitResponseMap {
   'get-commit-detail': ActionResult<CommitDetail>
   'get-commit-diff': ActionResult<CommitDiffResult>
   'get-stashes': ActionResult<StashSummary[]>
+  'get-stash-detail': ActionResult<StashDetail>
+  'get-stash-diff': ActionResult<DiffResult>
+  'create-stash': ActionResult<RepositorySummary>
+  'apply-stash': ActionResult<RepositorySummary>
+  'pop-stash': ActionResult<RepositorySummary>
+  'drop-stash': ActionResult<RepositorySummary>
+  'branch-stash': ActionResult<RepositorySummary>
   'get-sync-state': ActionResult<SyncState>
   'stage-paths': ActionResult<RepositorySummary>
   'unstage-paths': ActionResult<RepositorySummary>

@@ -1,4 +1,4 @@
-import type { ActionResult, CommitDetail, CommitDiffResult, CommitSummary, DiffResult, RepositoryReferences, RepositorySummary, StashSummary, SyncState } from '../shared/contracts';
+import type { ActionResult, CommitDetail, CommitDiffResult, CommitSummary, DiffResult, RepositoryReferences, RepositorySummary, StashSummary, StashDetail, SyncState } from '../shared/contracts';
 export type { BranchSummary, CommitDetail, CommitDiffResult, CommitFileChange, CommitRefSummary, CommitSummary, DiffResult, ReferenceSummary, RepositoryFile, RepositoryReferences, RepositorySummary, StashSummary, SyncState, } from '../shared/contracts';
 export interface GitRunResult {
     exitCode: number | null;
@@ -39,6 +39,11 @@ export declare class GitRepositoryService {
     getCommitDetail(workdir: string, hash: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<CommitDetail>>;
     getCommitDiff(workdir: string, hash: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<CommitDiffResult>>;
     getStashes(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<StashSummary[]>>;
+    private resolveStash;
+    getStashDetail(workdir: string, selector: unknown, hash: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<StashDetail>>;
+    getStashDiff(workdir: string, selector: unknown, hash: unknown, path: unknown, untracked: boolean, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<DiffResult>>;
+    createStash(request: MutationRequest, message: unknown, paths: unknown, includeUntracked: boolean): Promise<ActionResult<RepositorySummary>>;
+    mutateStash(request: MutationRequest, action: 'apply-stash' | 'pop-stash' | 'drop-stash' | 'branch-stash', selector: unknown, hash: unknown, name?: unknown, confirmRisk?: boolean): Promise<ActionResult<RepositorySummary>>;
     getSyncState(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<SyncState>>;
     fetchRemote(request: MutationRequest, remote: unknown): Promise<ActionResult<SyncState>>;
     pullFfOnly(request: MutationRequest): Promise<ActionResult<SyncState>>;

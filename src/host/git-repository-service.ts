@@ -1,4 +1,5 @@
 import { conflictWorkerCommand } from './conflict-worker'
+import { createStashCommand } from './stash-worker'
 import type {
   ActionErrorCode,
   ActionFailureReason,
@@ -15,6 +16,7 @@ import type {
   RepositoryReferences,
   RepositorySummary,
   StashSummary,
+  StashDetail,
   SyncState,
 } from '../shared/contracts'
 export type {
@@ -140,6 +142,12 @@ function conflictCount(files: RepositoryFile[]): number {
 
 function validCommitHash(hash: unknown): hash is string {
   return typeof hash === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(hash)
+}
+
+function validStashPath(path: unknown): path is string {
+  return typeof path === 'string' && path.length > 0 && path.length <= 4096
+    && !path.includes('\0') && !path.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(path)
+    && !path.split(/[\\/]/).some((part) => part === '..')
 }
 
 function parseCommitFiles(nameStatus: string, numstat: string): { files: CommitFileChange[]; filesTruncated: boolean; totals: CommitDetail['totals'] } {
@@ -420,6 +428,110 @@ export class GitRepositoryService {
       }
     })
     return { ok: true, data: stashes }
+  }
+
+  private async resolveStash(workdir: string, selector: unknown, hash: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<{ topLevel: string; hash: string; parents: string[] }>> {
+    if (typeof selector !== 'string' || !/^stash@\{\d{1,9}\}$/.test(selector) || !validCommitHash(hash)) {
+      return errorResult('INVALID_ARGUMENT', '必须提供有效的贮藏编号和完整哈希')
+    }
+    const root = await this.getTopLevel(workdir, signal, sandboxPolicy)
+    if (!root.ok) return root
+    const resolved = await this.run(root.data.topLevel, 'git rev-parse --verify ' + quoteShellArg(selector), 15_000, 4096, signal, sandboxPolicy)
+    if (resolved.exitCode !== 0 || (resolved.stdout?.text ?? '').trim() !== hash) {
+      return errorResult('STATE_CONFLICT', '贮藏列表已经变化，请刷新后重新选择')
+    }
+    const metadata = await this.run(root.data.topLevel, 'git show -s --format=%P ' + quoteShellArg(hash), 15_000, 4096, signal, sandboxPolicy)
+    const parents = (metadata.stdout?.text ?? '').trim().split(' ').filter(validCommitHash)
+    if (metadata.exitCode !== 0 || parents.length < 2) return errorResult('GIT_FAILED', '无法读取贮藏父节点')
+    return { ok: true, data: { topLevel: root.data.topLevel, hash, parents } }
+  }
+
+  async getStashDetail(workdir: string, selector: unknown, hash: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<StashDetail>> {
+    const stash = await this.resolveStash(workdir, selector, hash, signal, sandboxPolicy)
+    if (!stash.ok) return stash
+    const { topLevel, parents } = stash.data
+    const commands = ['git diff --no-ext-diff --no-textconv --no-renames --name-status -z ' + quoteShellArg(parents[0]!) + ' ' + quoteShellArg(stash.data.hash) + ' --']
+    if (parents[2]) commands.push('git diff-tree --root --no-commit-id --no-renames --name-status -r -z ' + quoteShellArg(parents[2]) + ' --')
+    const results = await Promise.all(commands.map((command) => this.run(topLevel, command, 20_000, COMMIT_DETAIL_MAX_CHARS, signal, sandboxPolicy)))
+    const failure = results.find((result) => result.exitCode !== 0)
+    if (failure) return errorResult('GIT_FAILED', '无法读取贮藏文件', redactAndLimit(outputOf(failure), 8192))
+    const files: StashDetail['files'] = []
+    let filesTruncated = false
+    results.forEach((result, index) => {
+      const raw = result.stdout?.text ?? ''
+      const parts = raw.split('\0')
+      if (raw.length >= COMMIT_DETAIL_MAX_CHARS || (raw && !raw.endsWith('\0'))) filesTruncated = true
+      for (let i = 0; i + 2 < parts.length; i += 2) {
+        if (files.length >= COMMIT_FILE_MAX) { filesTruncated = true; break }
+        files.push({ status: parts[i]!, path: parts[i + 1]!, untracked: index === 1 })
+      }
+    })
+    return { ok: true, data: { hash: stash.data.hash, files, filesTruncated } }
+  }
+
+  async getStashDiff(workdir: string, selector: unknown, hash: unknown, path: unknown, untracked: boolean, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<DiffResult>> {
+    if (!validStashPath(path)) return errorResult('INVALID_ARGUMENT', '请选择仓库内的文件路径')
+    const stash = await this.resolveStash(workdir, selector, hash, signal, sandboxPolicy)
+    if (!stash.ok) return stash
+    const { topLevel, parents } = stash.data
+    if (untracked && !parents[2]) return errorResult('INVALID_ARGUMENT', '该贮藏不包含未跟踪文件')
+    const common = '--no-color --no-ext-diff --no-textconv --no-renames --patch '
+    const command = untracked
+      ? 'git --literal-pathspecs diff-tree --root --no-commit-id -r ' + common + quoteShellArg(parents[2]!)
+      : 'git --literal-pathspecs diff ' + common + quoteShellArg(parents[0]!) + ' ' + quoteShellArg(stash.data.hash)
+    const result = await this.run(topLevel, command + ' -- ' + quoteShellArg(path), 30_000, DIFF_MAX_CHARS + 1024, signal, sandboxPolicy)
+    if (result.exitCode !== 0) return errorResult('GIT_FAILED', '无法读取贮藏 Diff', redactAndLimit(outputOf(result), 8192))
+    const raw = redactSecrets(result.stdout?.text ?? '')
+    return { ok: true, data: { path, staged: false, diff: raw.slice(0, DIFF_MAX_CHARS), truncated: raw.length > DIFF_MAX_CHARS } }
+  }
+
+  async createStash(request: MutationRequest, message: unknown, paths: unknown, includeUntracked: boolean): Promise<ActionResult<RepositorySummary>> {
+    if (typeof message !== 'string' || message.length > 4096 || message.includes('\0')) return errorResult('INVALID_ARGUMENT', '贮藏说明不能超过 4096 字符或包含空字符')
+    if (paths !== undefined && (!Array.isArray(paths) || !paths.length || paths.length > 500 || !paths.every(validStashPath))) {
+      return errorResult('INVALID_ARGUMENT', '请选择 1–500 个文件，或贮藏全部文件')
+    }
+    return this.withMutation(request, async () => {
+      const result = await this.run(request.workdir, createStashCommand(message, paths as string[] | undefined, includeUntracked), 120_000, MUTATION_OUTPUT_MAX_CHARS, request.signal, request.sandboxPolicy)
+      if (result.exitCode !== 0) return errorResult(mutationErrorCode(result), '创建贮藏失败，请刷新确认当前状态', redactAndLimit(outputOf(result), 8192))
+      try {
+        const response = JSON.parse(result.stdout?.text ?? '') as ActionResult<unknown>
+        if (!response.ok) return errorResult(response.code, response.message, redactAndLimit(response.diagnostics ?? '', 8192))
+      } catch { return errorResult('GIT_FAILED', '无法确认贮藏创建结果，请刷新') }
+      const summary = await this.getSummary(request.workdir, request.signal, request.sandboxPolicy)
+      return summary.ok ? { ...summary, operationId: String(request.operationId) } : summary
+    })
+  }
+
+  async mutateStash(request: MutationRequest, action: 'apply-stash' | 'pop-stash' | 'drop-stash' | 'branch-stash', selector: unknown, hash: unknown, name?: unknown, confirmRisk = false): Promise<ActionResult<RepositorySummary>> {
+    if (action === 'drop-stash' && !confirmRisk) return errorResult('PERMISSION_DENIED', '删除贮藏前必须确认其中的改动可能丢失')
+    if (action === 'branch-stash' && !validBranchName(name)) return errorResult('INVALID_ARGUMENT', '请输入有效的新分支名')
+    return this.withMutation(request, async () => {
+      const stash = await this.resolveStash(request.workdir, selector, hash, request.signal, request.sandboxPolicy)
+      if (!stash.ok) return stash
+      const root = stash.data.topLevel
+      // Dropping a stash does not touch the worktree. Other operations must not
+      // overlap an unfinished merge/rebase or unresolved stash conflict.
+      if (action !== 'drop-stash') {
+        const state = await this.conflictAction('get-conflicts', root, {}, undefined, request.sandboxPolicy)
+        if (!state.ok) return state as ActionResult<RepositorySummary>
+        const data = state.data as { operation: string | null; files: unknown[] }
+        if (data.operation || data.files.length) return errorResult('STATE_CONFLICT', '请先完成当前 Git 操作并解决冲突')
+        if (action === 'branch-stash') {
+          const summary = await this.getSummary(root, request.signal, request.sandboxPolicy)
+          if (!summary.ok) return summary
+          if (summary.data.files.length) return errorResult('STATE_CONFLICT', '从贮藏创建分支前，请先提交或贮藏当前改动', undefined, 'DIRTY_WORKTREE')
+        }
+      }
+      const command = action === 'branch-stash'
+        // Restore the saved index verbatim; apply.whitespace=fix/error must not
+        // rewrite its content or reject it during stash branch's --index apply.
+        ? 'git -c apply.whitespace=nowarn stash branch ' + quoteShellArg(name as string) + ' ' + quoteShellArg(selector as string)
+        : 'git stash ' + ({ 'apply-stash': 'apply', 'pop-stash': 'pop', 'drop-stash': 'drop' } as const)[action] + ' ' + quoteShellArg(action === 'apply-stash' ? stash.data.hash : selector as string)
+      const result = await this.run(root, command, 120_000, MUTATION_OUTPUT_MAX_CHARS, request.signal, request.sandboxPolicy)
+      if (result.exitCode !== 0) return errorResult(mutationErrorCode(result), '贮藏操作未完成；如有冲突，请在“冲突解决”中处理。失败的弹出会保留贮藏。', redactAndLimit(outputOf(result), 8192))
+      const summary = await this.getSummary(root, request.signal, request.sandboxPolicy)
+      return summary.ok ? { ...summary, operationId: String(request.operationId) } : summary
+    })
   }
 
   async getSyncState(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<SyncState>> {

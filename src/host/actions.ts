@@ -72,6 +72,13 @@ const REPOSITORY_ACTIONS = [
   'get-commit-detail',
   'get-commit-diff',
   'get-stashes',
+  'get-stash-detail',
+  'get-stash-diff',
+  'create-stash',
+  'apply-stash',
+  'pop-stash',
+  'drop-stash',
+  'branch-stash',
   'get-sync-state',
   'stage-paths',
   'unstage-paths',
@@ -218,6 +225,12 @@ async function dispatchRepositoryAction(
   if (action === 'get-commit-detail') return repository.getCommitDetail(context.workdir, body.hash, undefined, context.policy)
   if (action === 'get-commit-diff') return repository.getCommitDiff(context.workdir, body.hash, undefined, context.policy)
   if (action === 'get-stashes') return repository.getStashes(context.workdir, undefined, context.policy)
+  if (action === 'get-stash-detail') return repository.getStashDetail(context.workdir, body.selector, body.hash, undefined, context.policy)
+  if (action === 'get-stash-diff') return repository.getStashDiff(context.workdir, body.selector, body.hash, body.path, body.untracked === true, undefined, context.policy)
+  if (action === 'create-stash') return repository.createStash(base, body.message, body.paths, body.includeUntracked === true)
+  if (action === 'apply-stash' || action === 'pop-stash' || action === 'drop-stash' || action === 'branch-stash') {
+    return repository.mutateStash(base, action, body.selector, body.hash, body.name, body.confirmRisk === true)
+  }
   if (action === 'get-sync-state') return repository.getSyncState(context.workdir, undefined, context.policy)
   if (action === 'stage-paths') return repository.stagePaths(base, body.paths)
   if (action === 'unstage-paths') return repository.unstagePaths(base, body.paths)
