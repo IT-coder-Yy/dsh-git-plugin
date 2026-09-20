@@ -63,6 +63,17 @@ dsh web
 
 Use the Git button beside the composer to inspect changes, review commit history, stage files, commit changes, manage branches, or synchronize with a remote. Rebase and forceful branch deletion require an explicit risk confirmation.
 
+### Undo and amend commits
+
+Use **Changes → 提交撤销与修正** for the latest commit, or open a commit in **Commit history** to access its actions.
+
+- **Edit the latest message**: prefill the complete message and edit multiple lines (up to 48 KiB), leaving staged and working-tree content unchanged.
+- **Amend the latest commit**: include all staged changes while keeping its message. Unstaged changes are excluded.
+- **Undo the latest commit, keep changes**: use `reset --soft` to move to the first parent while preserving the index and working-tree files. The initial commit cannot be undone this way.
+- **Revert a commit**: create a reverse commit for a commit in the current branch's history. Requires a clean index and working tree. For merge commits, explicitly select the mainline parent whose relative changes should be reversed. Conflicts open the conflict workflow, with continue, abort, and skip controls. If there is nothing to revert, Git diagnostics are displayed.
+
+Each operation requires confirmation. The first three rewrite local history and can affect synchronization of published commits; they never force-push automatically. Changes to the branch, HEAD, or index invalidate the loaded state and require a refresh and fresh confirmation. Unfinished Git operations and unresolved conflicts block amendments. Related views refresh after execution.
+
 ### Branch merging
 
 Open **Git workbench → 合并分支 (Merge branches)**, select a local or fetched remote branch, and preview incoming commits and file changes before merging into the current local branch.
