@@ -13,7 +13,7 @@ interface Props {
 const drafts = new Map<string, { detail: ConflictDetail; text: string }>()
 const h = React.createElement
 const errorText = (value: unknown) => value instanceof Error ? value.message : String(value)
-const label = (operation: ConflictOperation | null) => operation === 'merge' ? 'Merge' : operation === 'rebase' ? 'Rebase' : operation === 'cherry-pick' ? 'Cherry-pick' : '无进行中的操作'
+const label = (operation: ConflictOperation | null) => operation === 'merge' ? 'Merge' : operation === 'rebase' ? 'Rebase' : operation === 'cherry-pick' ? 'Cherry-pick' : operation === 'revert' ? 'Revert' : '无进行中的操作'
 
 export function GitConflictsTab(props: Props) {
   const [state, setState] = React.useState<ConflictState | null>(null)
@@ -119,7 +119,7 @@ export function GitConflictsTab(props: Props) {
     value.reason ? h('p', null, value.reason) : !value.exists ? h('p', null, '该版本不存在（删除或新增冲突）')
       : h('pre', { className: 'gg-conflict-code', tabIndex: 0, 'aria-label': title + '代码和行号' }, (value.text ?? '').replace(/\r?\n$/, '').split(/\r?\n/).map((line, i) => h('span', { className: 'gg-conflict-line', key: i }, h('span', { className: 'gg-conflict-line-number' }, i + 1), line || ' '))))
   const ours = detail?.operation === 'rebase' ? '当前方（目标分支及已重放提交）' : '当前方（HEAD）'
-  const theirs = detail?.operation === 'rebase' ? '传入方（正在重放的提交）' : '传入方（待合入提交）'
+  const theirs = detail?.operation === 'rebase' ? '传入方（正在重放的提交）' : detail?.operation === 'revert' ? '传入方（撤销目标改动后的版本）' : '传入方（待合入提交）'
   const resolve = (choice: 'result' | 'ours' | 'theirs' | 'delete') => { if (detail) void mutate('resolve-conflict', { path: detail.path, token: detail.token, choice }) }
 
   return h('section', { className: 'gg-tab-content gg-conflicts', 'aria-label': '冲突解决' },

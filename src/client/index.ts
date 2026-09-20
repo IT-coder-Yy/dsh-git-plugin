@@ -1,6 +1,7 @@
 import { GitConflictsTab } from './conflict-tab'
 import { GitStashesTab } from './stash-tab'
 import { GitMergeTab } from './merge-tab'
+import { GitCommitActions } from './commit-actions'
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model'
 /**
  * dsh-easygit-plugin Client half as a static Cordis plugin package.
@@ -112,6 +113,9 @@ type RefreshState = 'idle' | 'loading' | 'succeeded' | 'failed'
 interface CommitTabProps {
   sessionId: string
   revision: number
+  onChanged: Dispose
+  onCommand: CommandReporter
+  onConflicts(): void
 }
 
 interface SyncTabProps extends RepositoryTabProps {}
@@ -1039,6 +1043,7 @@ interface SyncTabProps extends RepositoryTabProps {}
                 onClick: () => runMutation('commit', { message: commitMessage }).then((succeeded: boolean) => { if (succeeded) setCommitMessage('') }),
               }, '提交'),
             ),
+            React.createElement(GitCommitActions, { key: sessionId, sessionId, revision, rpc, disabled: busy, onBusy: setBusy, onChanged, onCommand, onConflicts: props.onConflicts }),
           ),
           React.createElement('div', { className: 'gg-diff' },
             React.createElement('div', { className: 'gg-intent' }, selected ? String(selected.path) + (selected.staged ? '（已暂存）' : '（未暂存）') : '选择文件以查看差异'),
@@ -1448,6 +1453,7 @@ interface SyncTabProps extends RepositoryTabProps {}
           detailLoading ? React.createElement('div', { className: 'gg-idletext' }, '正在加载提交详情…') : null,
           detailMessage ? React.createElement('div', { className: 'gg-workbench-error' }, detailMessage) : null,
           detail ? React.createElement(React.Fragment, null,
+            React.createElement(GitCommitActions, { key: sessionId + selectedHash, sessionId, revision, rpc, hash: detail.hash, parents: detail.parents, onChanged: props.onChanged, onCommand: props.onCommand, onConflicts: props.onConflicts }),
             detail.body ? React.createElement('pre', { className: 'gg-commit-message' }, String(detail.body)) : null,
             React.createElement('dl', { className: 'gg-commit-detail-meta' },
               React.createElement('dt', null, '作者'),
@@ -1915,7 +1921,7 @@ interface SyncTabProps extends RepositoryTabProps {}
           : tab === 'merge'
             ? React.createElement(GitMergeTab, { key: props.sessionId, sessionId: props.sessionId, revision, rpc, onChanged: refresh, onCommand: reportCommand, onConflicts: () => setTab('conflicts'), renderReview: renderReviewSurface, renderRawDiff: renderRawDiffSurface })
           : tab === 'commits'
-            ? React.createElement(GitCommitsTab, { sessionId: props.sessionId, revision })
+            ? React.createElement(GitCommitsTab, { sessionId: props.sessionId, revision, onChanged: refresh, onCommand: reportCommand, onConflicts: () => setTab('conflicts') })
             : tab === 'stashes'
               ? React.createElement(GitStashesTab, { key: props.sessionId, sessionId: props.sessionId, revision, rpc, onChanged: refresh, onCommand: reportCommand, onConflicts: () => setTab('conflicts'), renderReview: renderReviewSurface, renderRawDiff: renderRawDiffSurface })
               : tab === 'sync'
@@ -2300,6 +2306,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
+        GitCommitActions,
         GitMergeTab, GitStashesTab, GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
         deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
         refreshButtonLabel, recoveryProposalId, openRecoveryProposal, analysisProposalId, failureContext, buildAgentRepairPrompt,

@@ -86,7 +86,24 @@ export interface SyncState {
   files: RepositoryFile[]
 }
 
-export type ConflictOperation = 'merge' | 'rebase' | 'cherry-pick'
+export type ConflictOperation = 'merge' | 'rebase' | 'cherry-pick' | 'revert'
+export type CommitEditAction = 'amend-message' | 'amend-commit' | 'undo-commit' | 'revert-commit'
+export interface CommitEditState {
+  head: string
+  branch: string
+  message: string
+  parents: string[]
+  staged: boolean
+  dirty: boolean
+  blocked: boolean
+  token: string
+}
+interface CommitEditRequest {
+  sessionId: string
+  operationId: string
+  token: string
+  confirmRisk: boolean
+}
 export type MergeMode = 'normal' | 'ff-only' | 'squash'
 export interface MergePreview {
   branch: string
@@ -295,6 +312,11 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
 }
 
 export interface EasyGitRequestMap {
+  'get-commit-edit-state': { sessionId: string }
+  'amend-message': CommitEditRequest & { message: string }
+  'amend-commit': CommitEditRequest
+  'undo-commit': CommitEditRequest
+  'revert-commit': CommitEditRequest & { hash: string; mainline?: number }
   'get-merge-preview': { sessionId: string; target: string }
   'merge-branch': { sessionId: string; operationId: string; target: string; token: string; mode: MergeMode }
   'get-conflicts': { sessionId: string }
@@ -341,6 +363,11 @@ export interface EasyGitRequestMap {
 }
 
 export interface EasyGitResponseMap {
+  'get-commit-edit-state': ActionResult<CommitEditState>
+  'amend-message': ActionResult<ConflictState>
+  'amend-commit': ActionResult<ConflictState>
+  'undo-commit': ActionResult<ConflictState>
+  'revert-commit': ActionResult<ConflictState>
   'get-merge-preview': ActionResult<MergePreview>
   'merge-branch': ActionResult<ConflictState>
   'get-conflicts': ActionResult<ConflictState>

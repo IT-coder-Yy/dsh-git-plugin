@@ -752,6 +752,9 @@ export class GitRepositoryService {
   }
 
   async conflictAction(action: string, workdir: string, payload: Record<string, unknown>, request?: MutationRequest, sandboxPolicy?: unknown): Promise<ActionResult<unknown>> {
+    if (action === 'amend-message' && (typeof payload.message !== 'string' || Buffer.byteLength(payload.message) > 48 * 1024)) {
+      return errorResult('INVALID_ARGUMENT', '提交说明必须是 48 KiB 以内的文本')
+    }
     if (action === 'save-conflict' && (typeof payload.content !== 'string' || Buffer.byteLength(payload.content) > 48 * 1024)) {
       return errorResult('INVALID_ARGUMENT', '结果必须是 48 KiB 以内的文本')
     }
