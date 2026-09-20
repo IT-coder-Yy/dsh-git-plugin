@@ -129,6 +129,8 @@ The plugin registers two model tools:
 
 The Web profile adds a Git action beside the composer and opens the workbench in a native right-sidebar tab. Its tabs provide visual access to working-tree changes and diffs, branches and references, commit history and details, stashes, remote synchronization, and Agent-generated proposals. Commands are validated both when a proposal is created and immediately before execution. When an action fails, the workbench preserves structured error context and repository diagnostics; recognized failures can create a new recovery proposal, while complex failures can be handed back to the Agent for analysis.
 
+**Full stash management**: In the Stashes tab, add an optional message, select all or individual files, and optionally include untracked files. Selected-file stashes preserve unrelated staged and working-tree changes. Select a stash to review each file with line numbers and highlighted changes, or switch to the raw diff, including saved untracked files. Apply retains the stash; pop deletes it only after successful restoration; drop requires confirmation. Creating a branch requires a clean worktree, starts from the stash's original base, switches branches, and drops the stash after successful restoration. Conflicted apply/pop operations retain the stash and link to Conflict resolution. The list shows the latest 100 stashes, details show up to 500 files, and truncated diffs are marked.
+
 ## Security
 
 - Each step must contain exactly one allowed `git <subcommand> ...` command.
