@@ -1,4 +1,5 @@
 import { GitConflictsTab } from './conflict-tab';
+import { GitStashesTab } from './stash-tab';
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model';
 import { registerWorkbench, requestAgentAnalysis } from './panel-controller';
 import { appendCommandLog, analysisProposalId, beginTrackedRequest, buildAgentRepairPrompt, canDismissFailedProposal, buildFileTree, cancelTrackedRequest, commitFileTone, deriveCommitGraph, filterLocalBranches, failureContext, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, openRecoveryProposal, parseReviewRows, pendingProposalTransition, recoveryProposalId, repositoryName, shouldShowAnalysisBanner, type AnyRecord } from './view-model';
@@ -11,6 +12,7 @@ declare const plugin: {
     inject: string[];
     apply(ctx: AnyRecord): void;
     __testing: {
+        GitStashesTab: typeof GitStashesTab;
         GitConflictsTab: typeof GitConflictsTab;
         parseConflictBlocks: typeof parseConflictBlocks;
         chooseConflictBlock: typeof chooseConflictBlock;

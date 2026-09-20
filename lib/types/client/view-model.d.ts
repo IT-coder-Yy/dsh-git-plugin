@@ -1,6 +1,6 @@
 import type { BranchSummary, CommitSummary, GitFailureContext, RepositoryFile } from '../shared/contracts';
 export type AnyRecord = Record<string, any>;
-export type RepositoryMutationAction = 'stage-paths' | 'unstage-paths' | 'stage-all' | 'unstage-all' | 'commit' | 'create-branch' | 'switch-branch' | 'delete-branch';
+export type RepositoryMutationAction = 'stage-paths' | 'unstage-paths' | 'stage-all' | 'unstage-all' | 'commit' | 'create-branch' | 'switch-branch' | 'delete-branch' | 'create-stash' | 'apply-stash' | 'pop-stash' | 'drop-stash' | 'branch-stash';
 export interface CommandLogEntry {
     id: number;
     label: string;

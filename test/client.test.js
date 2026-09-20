@@ -571,3 +571,141 @@ test('三方冲突界面显示来源和行号，按块选择、保存后才标�
     delete global.window
   }
 })
+
+function stashHarness(rpc) {
+  const slots = []
+  let cursor = 0
+  let tree
+  const pending = []
+  const component = loadClientPlugin({
+    useState(initial) {
+      const index = cursor++
+      if (!(index in slots)) slots[index] = initial
+      return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value }]
+    },
+    useRef(initial) {
+      const index = cursor++
+      if (!(index in slots)) slots[index] = { current: initial }
+      return slots[index]
+    },
+    useEffect(effect, deps) {
+      const index = cursor++
+      const previous = slots[index]
+      if (!previous || deps.some((value, i) => !Object.is(value, previous.deps[i]))) {
+        pending.push(() => { previous?.cleanup?.(); slots[index] = { deps, cleanup: effect() } })
+      }
+    },
+  }).__testing.GitStashesTab
+  const requests = []
+  const props = {
+    sessionId: 'stash-ui', revision: 0, onChanged() {}, onConflicts() {}, onCommand: () => () => {},
+    renderReview: diff => 'review:' + diff, renderRawDiff: diff => 'raw:' + diff,
+    rpc(request, signal) { requests.push(request); return rpc(request, signal) },
+  }
+  const nodes = value => !value ? [] : Array.isArray(value) ? value.flatMap(nodes) : value.args ? [value, ...value.args.slice(2).flatMap(nodes)] : []
+  return {
+    requests, props,
+    async render() {
+      cursor = 0; tree = component(props)
+      while (pending.length) pending.shift()()
+      await new Promise(resolve => setImmediate(resolve))
+    },
+    nodes: () => nodes(tree),
+    button: label => nodes(tree).find(node => node.args[0] === 'button' && node.args[2] === label),
+    cleanup() { slots.forEach(slot => slot?.cleanup?.()) },
+  }
+}
+
+test('贮藏表单传递说明、精确文件选择及未跟踪选项，空选择不能提交', async () => {
+  const files = [{ path: 'a.txt', indexStatus: ' ', workTreeStatus: 'M' }, { path: 'new.txt', indexStatus: '?', workTreeStatus: '?' }]
+  const ui = stashHarness(async request => {
+    if (request.action === 'get-stashes') return { ok: true, data: [] }
+    if (request.action === 'get-summary') return { ok: true, data: { files } }
+    if (request.action === 'create-stash') return { ok: true, data: { files: [] } }
+    throw Error(request.action)
+  })
+  await ui.render(); await ui.render()
+  const input = label => ui.nodes().find(node => node.args[1]?.['aria-label'] === label)
+  input('贮藏说明').args[1].onChange({ target: { value: '我的说明' } })
+  const include = ui.nodes().find(node => node.args[0] === 'input' && node.args[1]?.type === 'checkbox')
+  include.args[1].onChange({ target: { checked: true } })
+  await ui.render()
+  ui.button('清空选择').args[1].onClick()
+  await ui.render()
+  assert.equal(ui.button('创建贮藏').args[1].disabled, true)
+  const newFileLabel = ui.nodes().find(node => node.args[0] === 'label' && node.args[4]?.args?.[2] === 'new.txt')
+  newFileLabel.args[2].args[1].onChange()
+  await ui.render()
+  ui.button('创建贮藏').args[1].onClick()
+  // A second click before React renders must not send another mutation.
+  ui.button('创建贮藏').args[1].onClick()
+  await ui.render(); await ui.render()
+  const mutations = ui.requests.filter(request => request.action === 'create-stash')
+  assert.equal(mutations.length, 1)
+  assert.deepStrictEqual(mutations[0].paths, ['new.txt'])
+  assert.equal(mutations[0].includeUntracked, true)
+  assert.equal(mutations[0].message, '我的说明')
+  assert.ok(mutations[0].operationId)
+  ui.cleanup()
+})
+
+test('贮藏详情支持文件审阅和原始 Diff，删除需确认且携带当前哈希', async () => {
+  const stash = { selector: 'stash@{0}', hash: 'a'.repeat(40), subject: 'snapshot', author: 'test', date: 'today' }
+  const file = { path: 'new.txt', status: 'A', untracked: true }
+  const ui = stashHarness(async request => {
+    if (request.action === 'get-stashes') return { ok: true, data: [stash] }
+    if (request.action === 'get-summary') return { ok: true, data: { files: [] } }
+    if (request.action === 'get-stash-detail') return { ok: true, data: { hash: stash.hash, files: [file] } }
+    if (request.action === 'get-stash-diff') return { ok: true, data: { diff: '@@ -0,0 +1 @@\n+new', truncated: true } }
+    if (request.action === 'drop-stash') return { ok: true, data: {} }
+    throw Error(request.action)
+  })
+  await ui.render(); await ui.render()
+  ui.nodes().find(node => node.args[1]?.className?.includes('gg-stash-select')).args[1].onClick()
+  await ui.render(); await ui.render()
+  assert.ok(ui.nodes().some(node => node.args[2] === 'review:@@ -0,0 +1 @@\n+new'))
+  assert.ok(ui.nodes().some(node => node.args[2] === 'Diff 过大，内容已截断。'))
+  ui.button('原始 Diff').args[1].onClick()
+  await ui.render()
+  assert.ok(ui.nodes().some(node => node.args[2] === 'raw:@@ -0,0 +1 @@\n+new'))
+  const diffRequest = ui.requests.find(request => request.action === 'get-stash-diff')
+  assert.equal(diffRequest.untracked, true)
+  assert.equal(diffRequest.path, 'new.txt')
+  ui.button('删除').args[1].onClick()
+  await ui.render()
+  assert.ok(!ui.requests.some(request => request.action === 'drop-stash'))
+  ui.button('确认删除贮藏').args[1].onClick()
+  await ui.render(); await ui.render()
+  const drop = ui.requests.find(request => request.action === 'drop-stash')
+  assert.equal(drop.hash, stash.hash)
+  assert.equal(drop.selector, stash.selector)
+  assert.equal(drop.confirmRisk, true)
+  ui.cleanup()
+})
+
+test('快速切换贮藏时旧详情不能覆盖当前选择', async () => {
+  const stashes = [0, 1].map(index => ({ selector: 'stash@{' + index + '}', hash: String(index).repeat(40), subject: 'stash ' + index }))
+  let resolveOld
+  const ui = stashHarness(async request => {
+    if (request.action === 'get-stashes') return { ok: true, data: stashes }
+    if (request.action === 'get-summary') return { ok: true, data: { files: [] } }
+    if (request.action === 'get-stash-detail') {
+      if (request.selector === stashes[0].selector) return new Promise(resolve => { resolveOld = resolve })
+      return { ok: true, data: { hash: stashes[1].hash, files: [{ path: 'current.txt', status: 'M', untracked: false }] } }
+    }
+    if (request.action === 'get-stash-diff') return { ok: true, data: { diff: 'current diff' } }
+    throw Error(request.action)
+  })
+  await ui.render(); await ui.render()
+  const rows = () => ui.nodes().filter(node => node.args[0] === 'button' && node.args[1]?.className?.includes('gg-stash-select'))
+  rows()[0].args[1].onClick()
+  await ui.render()
+  rows()[1].args[1].onClick()
+  await ui.render(); await ui.render()
+  resolveOld({ ok: true, data: { files: [{ path: 'old.txt', status: 'D', untracked: false }] } })
+  await ui.render(); await ui.render()
+  assert.ok(ui.button('M · current.txt'))
+  assert.ok(!ui.button('D · old.txt'))
+  assert.equal(ui.requests.filter(request => request.action === 'get-stash-diff').length, 1)
+  ui.cleanup()
+})

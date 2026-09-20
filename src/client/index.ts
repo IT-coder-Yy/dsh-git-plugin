@@ -1,4 +1,5 @@
 import { GitConflictsTab } from './conflict-tab'
+import { GitStashesTab } from './stash-tab'
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model'
 /**
  * dsh-easygit-plugin Client half as a static Cordis plugin package.
@@ -59,7 +60,6 @@ import type {
   ReferenceSummary,
   RepositoryFile,
   RepositorySummary,
-  StashSummary,
   SyncState,
 } from '../shared/contracts'
 
@@ -109,11 +109,6 @@ type FailureHandler = (response: AnyRecord) => void
 type RefreshState = 'idle' | 'loading' | 'succeeded' | 'failed'
 
 interface CommitTabProps {
-  sessionId: string
-  revision: number
-}
-
-interface StashTabProps {
   sessionId: string
   revision: number
 }
@@ -291,6 +286,16 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-commit-file.modified { color: #ffd166; }
         .gg-commit-file-path { min-width: 0; overflow: hidden; color: #d8dde0; text-overflow: ellipsis; white-space: nowrap; }
         .gg-commit-diff { max-height: 430px; overflow: auto; }
+        .gg-stash-files { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow: auto; }
+        .gg-stash-option { display: flex; align-items: baseline; gap: 8px; padding: 4px; overflow-wrap: anywhere; }
+        .gg-stash-option input { flex: none; }
+        .gg-stash-option code { white-space: pre; }
+        .gg-stash-select { border: 0; background: transparent; text-align: left; font: inherit; cursor: pointer; }
+        .gg-stash-select.active, .gg-stash-file.active { background: var(--gg-accent-soft); outline: 1px solid var(--gg-accent); outline-offset: -1px; }
+        .gg-stash-select:disabled { cursor: default; opacity: .6; }
+        .gg-stash-file { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+        .gg-stash-path, .gg-stash-confirm { overflow-wrap: anywhere; }
+        .gg-stash-message { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
         .gg-stash-list { gap: 0; }
         .gg-stash-row { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; padding: 6px 3px; border-bottom: 1px solid rgba(180,180,180,.16); }
         .gg-stash-row:last-child { border-bottom: 0; }
@@ -1533,59 +1538,6 @@ interface SyncTabProps extends RepositoryTabProps {}
       )
     }
 
-    function GitStashesTab(props: StashTabProps) {
-      const { sessionId, revision } = props
-      const [stashes, setStashes] = React.useState([] as StashSummary[])
-      const [loading, setLoading] = React.useState(false)
-      const [message, setMessage] = React.useState('')
-      const listRequestRef = React.useRef({ controller: null, sequence: 0 } as RequestSlot)
-
-      const load = () => {
-        const request = beginTrackedRequest(listRequestRef)
-        setLoading(true)
-        setMessage('')
-        rpc({ action: 'get-stashes', sessionId }, request.signal)
-          .then((response) => {
-            if (!isTrackedRequestCurrent(listRequestRef, request)) return
-            if (response && response.ok === true) setStashes(Array.isArray(response.data) ? response.data.slice(0, 100) : [])
-            else setMessage(actionError(response))
-          })
-          .catch((error) => {
-            if (isTrackedRequestCurrent(listRequestRef, request) && !isAbortError(error)) setMessage(errorText(error))
-          })
-          .then(() => {
-            if (isTrackedRequestCurrent(listRequestRef, request)) setLoading(false)
-          })
-      }
-
-      React.useEffect(() => {
-        load()
-        return () => cancelTrackedRequest(listRequestRef)
-      }, [sessionId, revision])
-
-      return React.createElement('section', { className: 'gg-tab-content' },
-        React.createElement('div', { className: 'gg-tab-toolbar' },
-          React.createElement('span', { className: 'gg-section-heading' }, '贮藏', React.createElement('span', { className: 'gg-section-count' }, String(stashes.length))),
-          React.createElement('button', { className: 'gg-btn', type: 'button', disabled: loading, onClick: load }, loading ? '正在刷新…' : '刷新'),
-        ),
-        message ? React.createElement('div', { className: 'gg-workbench-error' }, message) : null,
-        React.createElement('div', { className: 'gg-stash-list' }, loading && stashes.length === 0
-          ? React.createElement('div', { className: 'gg-idletext gg-reference-empty' }, '正在读取贮藏列表…')
-          : stashes.length ? stashes.map((stash: AnyRecord, index: number) => React.createElement('div', {
-            className: 'gg-stash-row', key: String(stash.hash || stash.selector || index),
-            title: [stash.selector, stash.hash, stash.subject, stash.author, stash.date].filter(Boolean).join(' · '),
-          },
-          React.createElement('code', { className: 'gg-stash-selector' }, String(stash.selector || 'stash@{?}')),
-          React.createElement('span', { className: 'gg-stash-subject' }, String(stash.subject || '（无贮藏说明）')),
-          React.createElement('code', { className: 'gg-stash-hash' }, String(stash.hash || '').slice(0, 8)),
-          React.createElement('div', { className: 'gg-stash-meta' },
-            React.createElement('span', { className: 'gg-stash-author' }, String(stash.author || '未知作者')),
-            React.createElement('span', { className: 'gg-stash-date' }, String(stash.date || '未知时间')),
-          ),
-          )) : React.createElement('div', { className: 'gg-idletext gg-reference-empty' }, '当前仓库没有贮藏。')),
-      )
-    }
-
     function GitSyncTab(props: SyncTabProps) {
       const { sessionId, revision, onChanged, onCommand, onFailure } = props
       const [state, setState] = React.useState(null as SyncState | null)
@@ -1961,7 +1913,7 @@ interface SyncTabProps extends RepositoryTabProps {}
           : tab === 'commits'
             ? React.createElement(GitCommitsTab, { sessionId: props.sessionId, revision })
             : tab === 'stashes'
-              ? React.createElement(GitStashesTab, { sessionId: props.sessionId, revision })
+              ? React.createElement(GitStashesTab, { key: props.sessionId, sessionId: props.sessionId, revision, rpc, onChanged: refresh, onCommand: reportCommand, onConflicts: () => setTab('conflicts'), renderReview: renderReviewSurface, renderRawDiff: renderRawDiffSurface })
               : tab === 'sync'
                 ? React.createElement(GitSyncTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure, onConflicts: () => setTab('conflicts') })
                 : React.createElement(GitDock, { sessionId: props.sessionId, intervalFn: props.intervalFn, timeoutFn: props.timeoutFn, onFailure: handleFailure })
@@ -2344,7 +2296,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
-        GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
+        GitStashesTab, GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
         deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
         refreshButtonLabel, recoveryProposalId, openRecoveryProposal, analysisProposalId, failureContext, buildAgentRepairPrompt,
         shouldShowAnalysisBanner, canDismissFailedProposal, pendingProposalTransition,

@@ -10,6 +10,11 @@ export type RepositoryMutationAction =
   | 'create-branch'
   | 'switch-branch'
   | 'delete-branch'
+  | 'create-stash'
+  | 'apply-stash'
+  | 'pop-stash'
+  | 'drop-stash'
+  | 'branch-stash'
 
 export interface CommandLogEntry {
   id: number
@@ -153,6 +158,15 @@ function displayShellArg(value: unknown): string {
 
 export function mutationCommand(action: string, payload: AnyRecord = {}): { label: string; command: string } | null {
   const paths = Array.isArray(payload.paths) ? payload.paths.map(displayShellArg).join(' ') : ''
+  if (action === 'create-stash') return {
+    label: '创建贮藏',
+    command: 'git --literal-pathspecs stash push' + (payload.includeUntracked ? ' --include-untracked' : '')
+      + (payload.message?.trim() ? ' --message ' + displayShellArg(payload.message.trim()) : '') + (paths ? ' -- ' + paths : ''),
+  }
+  if (action === 'branch-stash') return { label: '从贮藏创建分支', command: 'git -c apply.whitespace=nowarn stash branch ' + displayShellArg(payload.name) + ' ' + displayShellArg(payload.selector) }
+  if (action === 'apply-stash') return { label: '应用贮藏', command: 'git stash apply ' + displayShellArg(payload.hash) }
+  if (action === 'pop-stash') return { label: '弹出贮藏', command: 'git stash pop ' + displayShellArg(payload.selector) }
+  if (action === 'drop-stash') return { label: '删除贮藏', command: 'git stash drop ' + displayShellArg(payload.selector) }
   if (action === 'stage-paths') return { label: '暂存文件', command: 'git add -- ' + paths }
   if (action === 'unstage-paths') return { label: '取消暂存文件', command: 'git reset HEAD -- ' + paths }
   if (action === 'stage-all') return { label: '全部暂存', command: 'git add -A' }
