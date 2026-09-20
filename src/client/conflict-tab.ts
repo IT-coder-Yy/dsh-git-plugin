@@ -91,6 +91,7 @@ export function GitConflictsTab(props: Props) {
     setBusy(true); setMessage('')
     const command = action === 'save-conflict' ? '保存工作区文件 ' + String(payload.path)
       : action === 'resolve-conflict' ? '标记解决 ' + String(payload.path) + '（' + String(payload.choice) + '）'
+        : action === 'finish-operation' && state?.mergeMode === 'squash' ? payload.mode === 'abort' ? 'git reset --merge HEAD' : 'git commit --no-edit -F SQUASH_MSG'
         : 'git ' + String(payload.kind) + ' ' + (action === 'start-operation' ? String(payload.target) : '--' + String(payload.mode))
     const complete = props.onCommand(action === 'save-conflict' ? '保存冲突结果' : '冲突处理', command)
     try {
@@ -125,7 +126,7 @@ export function GitConflictsTab(props: Props) {
     h('div', { className: 'gg-tab-toolbar' }, h('strong', null, state ? label(state.operation) + ' · ' + state.files.length + ' 个冲突' : '正在读取冲突状态…'), button('刷新列表', () => { void load() })),
     message ? h('pre', { className: 'gg-workbench-error', role: 'status', style: { whiteSpace: 'pre-wrap' } }, message) : null,
     state?.operation ? h('div', { className: 'gg-sync-actions' },
-      h('p', null, state.files.length ? '逐个保存并标记解决后，继续当前操作。' : '冲突均已暂存，可以继续；若 Git 提示空提交，可跳过当前提交。'),
+      h('p', null, state.files.length ? '逐个保存并标记解决后，继续当前操作。' : state.mergeMode === 'squash' ? '压缩合并结果已暂存，继续将创建一个单父提交；也可中止恢复。' : '冲突均已暂存，可以继续；若 Git 提示空提交，可跳过当前提交。'),
       h('label', { className: 'gg-check' }, h('input', { type: 'checkbox', checked: risk, disabled: busy, onChange: e => setRisk(e.currentTarget.checked) }), '我了解继续可能创建或重写提交；中止或跳过会丢弃本次处理内容'),
       h('div', { className: 'gg-actions' }, ...(['continue', 'abort', ...(state.operation === 'merge' ? [] : ['skip'])] as const).map(mode => button(mode === 'continue' ? '继续 ' + label(state.operation) : mode === 'abort' ? '中止 ' + label(state.operation) : '跳过当前提交', () => { void mutate('finish-operation', { kind: state.operation, token: state.operationToken, mode, confirmRisk: risk }) }, !risk || dirty || (mode === 'continue' && state.files.length > 0), mode === 'continue'))),
     ) : h('div', { className: 'gg-sync-actions' },

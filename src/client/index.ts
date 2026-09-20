@@ -1,5 +1,6 @@
 import { GitConflictsTab } from './conflict-tab'
 import { GitStashesTab } from './stash-tab'
+import { GitMergeTab } from './merge-tab'
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model'
 /**
  * dsh-easygit-plugin Client half as a static Cordis plugin package.
@@ -1883,6 +1884,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         { id: 'changes', label: '变更' },
         { id: 'conflicts', label: '冲突解决' },
         { id: 'branches', label: '分支' },
+        { id: 'merge', label: '合并分支' },
         { id: 'commits', label: '提交记录' },
         { id: 'stashes', label: '贮藏' },
         { id: 'sync', label: '同步' },
@@ -1910,6 +1912,8 @@ interface SyncTabProps extends RepositoryTabProps {}
           ? React.createElement(GitConflictsTab, { key: props.sessionId, sessionId: props.sessionId, revision, rpc, onChanged: refresh, onDirty: setConflictDirty, onCommand: reportCommand })
         : tab === 'branches'
           ? React.createElement(GitBranchesTab, { sessionId: props.sessionId, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure })
+          : tab === 'merge'
+            ? React.createElement(GitMergeTab, { key: props.sessionId, sessionId: props.sessionId, revision, rpc, onChanged: refresh, onCommand: reportCommand, onConflicts: () => setTab('conflicts'), renderReview: renderReviewSurface, renderRawDiff: renderRawDiffSurface })
           : tab === 'commits'
             ? React.createElement(GitCommitsTab, { sessionId: props.sessionId, revision })
             : tab === 'stashes'
@@ -2296,7 +2300,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
-        GitStashesTab, GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
+        GitMergeTab, GitStashesTab, GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
         deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
         refreshButtonLabel, recoveryProposalId, openRecoveryProposal, analysisProposalId, failureContext, buildAgentRepairPrompt,
         shouldShowAnalysisBanner, canDismissFailedProposal, pendingProposalTransition,

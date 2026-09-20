@@ -262,7 +262,7 @@ export class GitRepositoryService {
   async getBranches(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<RepositoryReferences>> {
     const topLevel = await this.getTopLevel(workdir, signal, sandboxPolicy)
     if (!topLevel.ok) return topLevel
-    const branchFormat = '%(HEAD)%09%(refname:short)%09%(upstream:short)'
+    const branchFormat = '%(HEAD)%09%(refname:lstrip=2)%09%(upstream:short)'
     const referenceFormat = '%(refname)%09%(refname:short)%09%(objectname:short)%09%(*objectname:short)%09%(subject)'
     const [branchResult, referenceResult] = await Promise.all([
       this.run(workdir, 'git branch --format=' + quoteShellArg(branchFormat), 15_000, 30_000, signal, sandboxPolicy),
@@ -280,7 +280,9 @@ export class GitRepositoryService {
     for (const line of (referenceResult.stdout?.text ?? '').split('\n').filter(Boolean)) {
       const [fullName = '', shortName = '', objectHash = '', peeledHash = '', subject = ''] = line.split('\t')
       const entry = {
-        name: redactAndLimit(shortName, 512),
+        // Git's :short adds heads/ or remotes/ when references collide.
+        // The UI already distinguishes namespaces, so keep the actual name.
+        name: redactAndLimit(fullName.startsWith('refs/remotes/') ? fullName.slice(13) : shortName, 512),
         hash: redactAndLimit(peeledHash || objectHash, 128),
         subject: redactAndLimit(subject, 4096),
       }

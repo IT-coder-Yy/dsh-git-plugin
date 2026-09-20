@@ -13,11 +13,21 @@ const fail = (message, code = 'STATE_CONFLICT') => { throw Object.assign(new Err
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true' } });
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const exists = file => fs.existsSync(file);
+const gitPath = name => git('rev-parse', '--git-path', name).trim();
+function squashState() {
+  const file = gitPath('easygit-squash.json');
+  if (!exists(file) || !exists(gitPath('SQUASH_MSG'))) return null;
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // A commit or branch switch outside the workbench ends our ownership.
+  if (saved.head !== git('rev-parse', 'HEAD').trim() || saved.branch !== 'refs/heads/' + git('branch', '--show-current').trim()) return null;
+  return saved;
+}
 function operationState() {
   const dir = name => git('rev-parse', '--git-path', name).trim();
   const names = ['rebase-merge', 'rebase-apply', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'sequencer'];
   const paths = names.map(dir);
-  const operation = exists(paths[0]) || exists(paths[1]) ? 'rebase' : exists(paths[2]) ? 'merge' : exists(paths[3]) || (exists(path.join(paths[4], 'todo')) && /^pick /m.test(fs.readFileSync(path.join(paths[4], 'todo'), 'utf8'))) ? 'cherry-pick' : null;
+  const squash = squashState();
+  const operation = exists(paths[0]) || exists(paths[1]) ? 'rebase' : exists(paths[2]) ? 'merge' : exists(paths[3]) || (exists(path.join(paths[4], 'todo')) && /^pick /m.test(fs.readFileSync(path.join(paths[4], 'todo'), 'utf8'))) ? 'cherry-pick' : squash ? 'merge' : null;
   const meta = ['HEAD', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'rebase-merge/head-name', 'rebase-merge/onto', 'rebase-merge/msgnum', 'rebase-merge/stopped-sha', 'rebase-apply/next', 'rebase-apply/orig-head', 'sequencer/todo'].map(name => {
     const file = dir(name); return exists(file) ? fs.readFileSync(file).toString('base64') : '';
   });
@@ -28,7 +38,37 @@ function operationState() {
     if (exists(dir(branch))) throw error;
     head = 'unborn:' + branch;
   }
-  return { operation, operationToken: hash(JSON.stringify([operation, meta, head])) };
+  return { operation, ...(squash && operation === 'merge' ? { mergeMode: 'squash' } : {}), operationToken: hash(JSON.stringify([operation, meta, head, squash])) };
+}
+function mergeSnapshot() {
+  if (typeof input.target !== 'string' || !/^refs\/(heads|remotes)\/.+/.test(input.target) || /[\0\r\n]/.test(input.target)) fail('请选择本地或远程源分支', 'INVALID_ARGUMENT');
+  git('check-ref-format', input.target);
+  const name = git('branch', '--show-current').trim();
+  if (!name) fail('分离 HEAD 状态不能合并分支，请先切换到本地分支');
+  const branch = 'refs/heads/' + name;
+  if (branch === input.target) fail('不能将当前分支合并到自身');
+  const head = git('rev-parse', '--verify', 'HEAD').trim();
+  const sourceHead = git('rev-parse', '--verify', '--end-of-options', input.target + '^{commit}').trim();
+  return { branch: branch.slice('refs/heads/'.length), target: input.target, head, sourceHead, token: hash(JSON.stringify([branch, input.target, head, sourceHead])) };
+}
+function ancestor(a, b) {
+  try { git('merge-base', '--is-ancestor', a, b); return true; }
+  catch (error) { if (error.status === 1) return false; throw error; }
+}
+function previewMerge() {
+  const snapshot = mergeSnapshot();
+  const { head, sourceHead } = snapshot;
+  let base;
+  try { base = git('merge-base', head, sourceHead).trim(); }
+  catch (error) { if (error.status === 1) fail('两个分支没有共同祖先，不支持合并无关历史'); throw error; }
+  const fields = git('log', '--no-color', '--max-count=201', '--format=%H%x00%s%x00%an%x00%aI%x00', head + '..' + sourceHead).split('\0');
+  const commits = [];
+  for (let i = 0; i + 3 < fields.length; i += 4) commits.push({ hash: fields[i].trim(), subject: fields[i + 1], author: fields[i + 2], date: fields[i + 3] });
+  const files = git('diff', '--name-only', '-z', base, sourceHead, '--').split('\0').filter(Boolean);
+  let diff, overflow = false;
+  try { diff = git('-c', 'core.quotePath=false', 'diff', '--no-ext-diff', '--no-textconv', '--no-color', base, sourceHead, '--'); }
+  catch (error) { if (error.code !== 'ENOBUFS') throw error; diff = String(error.stdout || ''); overflow = true; }
+  return { ...snapshot, base, canFastForward: ancestor(head, sourceHead), alreadyMerged: ancestor(sourceHead, head), commits: commits.slice(0, 200), commitsTruncated: commits.length > 200, files: files.slice(0, 500), filesTruncated: files.length > 500, diff: diff.slice(0, 180000), diffTruncated: overflow || diff.length > 180000 };
 }
 function entries() {
   return git('ls-files', '--unmerged', '-z').split('\0').filter(Boolean).map(row => {
@@ -85,12 +125,14 @@ function detail(file) {
     return version(execFileSync('git', ['cat-file', 'blob', row.oid], { maxBuffer: LIMIT + 1024 }), row.mode);
   });
   const op = operationState();
+  const squash = op.mergeMode === 'squash' ? squashState() : null;
   for (const [index, ref] of [[1, 'HEAD'], [2, op.operation === 'merge' ? 'MERGE_HEAD' : op.operation === 'rebase' ? 'REBASE_HEAD' : op.operation === 'cherry-pick' ? 'CHERRY_PICK_HEAD' : null]]) {
     const row = rows.find(row => row.stage === index + 1);
     versions[index].source = row ? '索引 stage ' + (index + 1) + ' · blob ' + row.oid.slice(0, 12) : '该方无文件';
     if (ref && op.operation) {
       try { versions[index].source = ref + ' · ' + git('rev-parse', '--verify', ref + '^{commit}').trim().slice(0, 12); } catch {}
     }
+    if (index === 2 && squash) versions[index].source = '压缩合并源 · ' + squash.sourceHead.slice(0, 12);
   }
   const result = version(working);
   const attr = git('check-attr', '-z', 'conflict-marker-size', '--', file).split('\0')[2];
@@ -105,6 +147,26 @@ function markers(text, size) {
 }
 function main() {
   process.chdir(git('rev-parse', '--show-toplevel').trim());
+  if (input.action === 'get-merge-preview') return previewMerge();
+  if (input.action === 'merge-branch') {
+    if (!['normal', 'ff-only', 'squash'].includes(input.mode)) fail('无效的合并方式', 'INVALID_ARGUMENT');
+    if (state().operation || entries().length) fail('请先完成或中止当前 Git 操作');
+    if (git('status', '--porcelain', '--untracked-files=all').trim()) fail('合并前请先提交或贮藏工作区改动');
+    const snapshot = mergeSnapshot();
+    if (snapshot.token !== input.token) fail('分支已变化，请重新预览后合并');
+    if (ancestor(snapshot.sourceHead, snapshot.head)) return state();
+    if (input.mode === 'squash') {
+      fs.writeFileSync(gitPath('easygit-squash.json'), JSON.stringify({ head: snapshot.head, branch: 'refs/heads/' + snapshot.branch, sourceHead: snapshot.sourceHead }));
+    }
+    // Explicit flags keep user merge.ff / branch mergeOptions from changing the selected mode.
+    try {
+      git('-c', 'merge.autoStash=false', 'merge', '--no-edit', '--no-autostash', '--no-overwrite-ignore', ...(input.mode === 'squash' ? ['--squash', '--ff', '--no-commit'] : input.mode === 'ff-only' ? ['--ff-only', '--no-squash', '--commit'] : ['--ff', '--no-squash', '--commit']), snapshot.sourceHead);
+    } catch (error) {
+      if (input.mode === 'squash' && !entries().length && !git('status', '--porcelain').trim()) fs.unlinkSync(gitPath('easygit-squash.json'));
+      throw error;
+    }
+    return state();
+  }
   if (input.action === 'get-conflicts') return state();
   if (input.action === 'get-conflict') return detail(input.path);
   if (input.action === 'save-conflict' || input.action === 'resolve-conflict') {
@@ -158,7 +220,13 @@ function main() {
     if (!current.operation || current.operation !== input.kind || current.operationToken !== input.token) fail('Git 操作状态已改变，请刷新');
     if (!['continue', 'abort', 'skip'].includes(input.mode) || (input.mode === 'skip' && input.kind === 'merge')) fail('不支持的后续操作', 'INVALID_ARGUMENT');
     if (input.mode === 'continue' && current.files.length) fail('仍有未标记解决的冲突文件');
-    git(input.kind, '--' + input.mode);
+    if (current.mergeMode === 'squash') {
+      const saved = squashState();
+      if (input.mode === 'abort') git('reset', '--merge', saved.head);
+      else git('commit', '--no-edit', '-F', gitPath('SQUASH_MSG'));
+      fs.unlinkSync(gitPath('easygit-squash.json'));
+      if (exists(gitPath('SQUASH_MSG'))) fs.unlinkSync(gitPath('SQUASH_MSG'));
+    } else git(input.kind, '--' + input.mode);
     return state();
   }
   fail('无效操作', 'INVALID_ARGUMENT');
@@ -168,7 +236,7 @@ catch (error) {
   let pending = null;
   try { pending = state(); } catch {}
   // A new conflict is an expected stop in a multi-step Git operation.
-  if ((input.action === 'start-operation' || (input.action === 'finish-operation' && input.mode !== 'abort')) && error.status && pending && pending.operation === input.kind && pending.files.length) {
+  if ((input.action === 'start-operation' || input.action === 'merge-branch' || (input.action === 'finish-operation' && input.mode !== 'abort')) && error.status && pending && pending.operation === (input.action === 'merge-branch' ? 'merge' : input.kind) && pending.files.length) {
     console.log(JSON.stringify({ ok: true, data: pending }));
   } else console.log(JSON.stringify({ ok: false, code: ['STATE_CONFLICT', 'INVALID_ARGUMENT', 'PERMISSION_DENIED'].includes(error.code) ? error.code : 'GIT_FAILED', message: error.status ? 'Git 操作未完成，请查看详情' : error.message, diagnostics: error.stderr ? error.stderr.toString() : undefined }));
 }

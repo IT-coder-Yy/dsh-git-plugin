@@ -59,6 +59,8 @@ interface EasyGitActionDependencies {
 }
 
 const REPOSITORY_ACTIONS = [
+  'get-merge-preview',
+  'merge-branch',
   'get-conflicts',
   'get-conflict',
   'save-conflict',
@@ -214,8 +216,8 @@ async function dispatchRepositoryAction(
   if (!context) return { ok: false, code: 'SESSION_NOT_FOUND', message: '无法确定当前会话的仓库目录' }
   const repository = dependencies.repository
   const base = { sessionId, workdir: context.workdir, operationId: body.operationId, sandboxPolicy: context.policy }
-  if (action === 'get-conflicts' || action === 'get-conflict') return repository.conflictAction(action, context.workdir, body, undefined, context.policy)
-  if (action === 'save-conflict' || action === 'resolve-conflict' || action === 'start-operation' || action === 'finish-operation') {
+  if (action === 'get-conflicts' || action === 'get-conflict' || action === 'get-merge-preview') return repository.conflictAction(action, context.workdir, body, undefined, context.policy)
+  if (action === 'save-conflict' || action === 'resolve-conflict' || action === 'start-operation' || action === 'finish-operation' || action === 'merge-branch') {
     return repository.conflictAction(action, context.workdir, body, base)
   }
   if (action === 'get-summary') return repository.getSummary(context.workdir, undefined, context.policy)

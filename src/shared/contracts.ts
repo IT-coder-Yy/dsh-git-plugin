@@ -87,6 +87,23 @@ export interface SyncState {
 }
 
 export type ConflictOperation = 'merge' | 'rebase' | 'cherry-pick'
+export type MergeMode = 'normal' | 'ff-only' | 'squash'
+export interface MergePreview {
+  branch: string
+  target: string
+  head: string
+  sourceHead: string
+  base: string
+  token: string
+  canFastForward: boolean
+  alreadyMerged: boolean
+  commits: Array<{ hash: string; subject: string; author: string; date: string }>
+  commitsTruncated: boolean
+  files: string[]
+  filesTruncated: boolean
+  diff: string
+  diffTruncated: boolean
+}
 export interface ConflictFile {
   path: string
   kind: string
@@ -94,6 +111,7 @@ export interface ConflictFile {
 }
 export interface ConflictState {
   operation: ConflictOperation | null
+  mergeMode?: 'squash'
   operationToken: string
   files: ConflictFile[]
 }
@@ -277,6 +295,8 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
 }
 
 export interface EasyGitRequestMap {
+  'get-merge-preview': { sessionId: string; target: string }
+  'merge-branch': { sessionId: string; operationId: string; target: string; token: string; mode: MergeMode }
   'get-conflicts': { sessionId: string }
   'get-conflict': { sessionId: string; path: string }
   'save-conflict': { sessionId: string; operationId: string; path: string; token: string; content: string }
@@ -321,6 +341,8 @@ export interface EasyGitRequestMap {
 }
 
 export interface EasyGitResponseMap {
+  'get-merge-preview': ActionResult<MergePreview>
+  'merge-branch': ActionResult<ConflictState>
   'get-conflicts': ActionResult<ConflictState>
   'get-conflict': ActionResult<ConflictDetail>
   'save-conflict': ActionResult<ConflictDetail>
