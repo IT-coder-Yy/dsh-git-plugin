@@ -167,19 +167,19 @@ Please report vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
 ## Compatibility
 
-Last verified on **2026-09-18** with DeepSeek Harness `0.1.6-alpha.2` and dsh-easygit-plugin `0.3.0`, against upstream commit [`ddefc45`](https://github.com/deepseek-ai/deepseek-harness/commit/ddefc45fbc7f8e46dd73185e68295696d1297887). Web startup, native tab registration, and repository inspection were also checked on `0.1.5-rc.2`. The `0.3.x` plugin uses the new sidebar and session APIs and no longer targets `0.1.0-rc.8`.
+Last verified on **2026-09-24** with DeepSeek Harness `0.1.7-rc.1` and dsh-easygit-plugin `0.3.0`, against upstream commit [`46a7f68`](https://github.com/deepseek-ai/deepseek-harness/commit/46a7f68b0922371ce7144b668b90e377d8e799f4). The shell integration uses the new `execute(spec).result()` API and retains the `run(spec)` fallback for `0.1.6-alpha.2`. The `0.3.x` plugin uses the native sidebar and session APIs and no longer targets `0.1.0-rc.8`.
 
 The adaptation uses native sidebar tabs (DSH owns sizing, splitting, and closing), session-scoped Agent analysis, repository access for sessions without a running Agent and persisted sessions, and DSH Connection browser authentication and origin checks. Persisted sandbox modes are preserved; unknown sessions never fall back to an arbitrary directory.
 
-Validation covered `npm run check` (72 tests and 24 reproducible build artifacts), a dry-run npm package, and browser checks on `0.1.6-alpha.2` for repository inspection, diffs, staging, committing, and native tab operations. Git integration tests use temporary repositories and cover branches, stashes, fetch/pull/push, successful and conflicted Rebases, recovery, and proposal safety. Live model-generated replies were not exercised.
+Validation covered `npm run check` (148 tests and 31 reproducible build artifacts), browser checks on `0.1.7-rc.1` for Web startup, native tabs, repository status, branches, and commit history, plus a repository-status check on `0.1.6-alpha.2`. Git integration tests use temporary repositories and cover branches, stashes, fetch/pull/push, successful and conflicted Rebases, recovery, and proposal safety. Live model-generated replies and repository mutations through the `0.1.7-rc.1` browser UI were not exercised.
 
 Install the official package matching that source version without building DSH yourself:
 
 ```sh
-npm install -g @deepseek-ai/dsh@0.1.6-alpha.2
+npm install -g @deepseek-ai/dsh@0.1.7-rc.1
 ```
 
-Back up the DSH installation and Web profile before upgrading, and check other third-party plugins for compatibility. Older plugins may reference removed settings APIs and prevent the entire profile from starting.
+Back up the DSH installation and Web profile before upgrading, and check other third-party plugins for compatibility. If your Web profile includes `dsh-client-auto-continue`, upgrade it to `0.11.8` or later; `0.11.6` waits for the removed `settingsScope` service and blocks Web startup on DSH `0.1.7-rc.1`.
 
 ## Development
 

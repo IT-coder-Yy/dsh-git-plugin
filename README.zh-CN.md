@@ -167,19 +167,19 @@ Web profile 会在输入框旁添加 Git 操作入口，并在原生右侧标签
 
 ## 兼容性
 
-最后于 **2026-09-18** 使用 DeepSeek Harness `0.1.6-alpha.2` 和 dsh-easygit-plugin `0.3.0` 完成验证，对照上游源码提交 [`ddefc45`](https://github.com/deepseek-ai/deepseek-harness/commit/ddefc45fbc7f8e46dd73185e68295696d1297887)。`0.1.5-rc.2` 也已完成 Web 启动、标签页挂载和仓库读取验证。`0.3.x` 使用新的右侧标签页与会话接口，不再适配旧版 `0.1.0-rc.8`。
+最后于 **2026-09-24** 使用 DeepSeek Harness `0.1.7-rc.1` 和 dsh-easygit-plugin `0.3.0` 完成验证，对照上游源码提交 [`46a7f68`](https://github.com/deepseek-ai/deepseek-harness/commit/46a7f68b0922371ce7144b668b90e377d8e799f4)。Shell 调用已适配新的 `execute(spec).result()` 接口，并保留 `run(spec)` 作为 `0.1.6-alpha.2` 的兼容路径。`0.3.x` 使用原生右侧标签页与会话接口，不再适配旧版 `0.1.0-rc.8`。
 
 本次适配包括：原生右侧标签页（宽度、分栏和关闭由 DSH 管理）、会话作用域的 Agent 分析请求、尚未创建 Agent 及冷会话的仓库访问，以及复用 DSH Connection 的浏览器认证和来源检查。冷会话保留已记录的沙箱模式；没有有效会话时不会回退到任意工作目录。
 
-验证范围：`npm run check`（72 项测试、24 个可重复构建产物）、npm 发布包 dry-run，以及 `0.1.6-alpha.2` 浏览器中的仓库读取、Diff、暂存、提交和原生标签页操作。Git 集成测试使用临时仓库，覆盖分支、贮藏、fetch/pull/push、成功与冲突 Rebase、修正建议和提议安全校验。真实模型生成回复未纳入本次验证。
+验证范围：`npm run check`（148 项测试、31 个可重复构建产物），`0.1.7-rc.1` 浏览器中的 Web 启动、原生标签页、仓库状态、分支与提交记录，以及 `0.1.6-alpha.2` 的仓库状态。Git 集成测试使用临时仓库，覆盖分支、贮藏、fetch/pull/push、成功与冲突 Rebase、修正建议和提议安全校验。真实模型生成回复及 `0.1.7-rc.1` 浏览器中的仓库修改操作未纳入本次验证。
 
 要安装与上述源码版本一致的官方包，无需自行编译：
 
 ```sh
-npm install -g @deepseek-ai/dsh@0.1.6-alpha.2
+npm install -g @deepseek-ai/dsh@0.1.7-rc.1
 ```
 
-升级前建议备份 DSH 安装与 Web profile，并检查其他第三方插件是否兼容新版本；旧插件可能引用上游已删除的设置接口，导致整个 profile 无法启动。
+升级前建议备份 DSH 安装与 Web profile，并检查其他第三方插件是否兼容新版本。若 Web profile 安装了 `dsh-client-auto-continue`，请将其升级到 `0.11.8` 或更新版本；`0.11.6` 会等待已移除的 `settingsScope` 服务，导致 DSH `0.1.7-rc.1` 的 Web 页面无法启动。
 
 ## 开发
 
