@@ -35,6 +35,21 @@ function callHttp(handler, body) {
   })
 }
 
+test('新版 DSH shell.execute 的结果可用于仓库读取和命令诊断', async () => {
+  const dir = createRepo()
+  try {
+    const oldShell = makeShell(dir)
+    const shell = {
+      resolve: oldShell.resolve,
+      execute: async (spec) => ({ result: () => oldShell.run(spec) }),
+    }
+    const summary = await new helpers.GitRepositoryService(shell).getSummary(dir)
+    assert.strictEqual(summary.ok, true)
+    assert.strictEqual(summary.data.branch, 'main')
+    assert.match(await captureFingerprint(shell, dir), /--H--/)
+  } finally { cleanup(dir) }
+})
+
 test('提交流程：add+commit 两步执行 → 逐步成功 → 预期校验全部通过', async () => {
   const dir = createRepo()
   try {

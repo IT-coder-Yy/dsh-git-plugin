@@ -47,7 +47,14 @@ export interface GitRunResult {
 
 export interface ShellService {
   resolve(request: Record<string, unknown>): unknown
-  run(specification: unknown): Promise<GitRunResult>
+  run?(specification: unknown): Promise<GitRunResult>
+  execute?(specification: unknown): Promise<{ result(): Promise<GitRunResult> }>
+}
+
+export async function runShell(shell: ShellService, specification: unknown): Promise<GitRunResult> {
+  if (shell.execute) return (await shell.execute(specification)).result()
+  if (shell.run) return shell.run(specification)
+  throw new Error('shell 服务不支持执行命令')
 }
 
 interface MutationRequest {
@@ -195,7 +202,7 @@ export class GitRepositoryService {
     if (!this.shell) return { exitCode: -1, stderr: { text: 'shell 服务不可用' } }
     try {
       const specification = this.shell.resolve({ command, workdir, timeoutMs, stdoutMaxBytes, signal, ...(sandboxPolicy ? { sandboxPolicy } : {}) })
-      return await this.shell.run(specification)
+      return await runShell(this.shell, specification)
     } catch (error) {
       return { exitCode: -1, stderr: { text: error instanceof Error ? error.message : String(error) } }
     }

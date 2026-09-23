@@ -14,8 +14,12 @@ export interface GitRunResult {
 }
 export interface ShellService {
     resolve(request: Record<string, unknown>): unknown;
-    run(specification: unknown): Promise<GitRunResult>;
+    run?(specification: unknown): Promise<GitRunResult>;
+    execute?(specification: unknown): Promise<{
+        result(): Promise<GitRunResult>;
+    }>;
 }
+export declare function runShell(shell: ShellService, specification: unknown): Promise<GitRunResult>;
 interface MutationRequest {
     sessionId: string;
     workdir: string;

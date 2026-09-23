@@ -20,6 +20,7 @@ import {
 } from './proposal-service'
 import {
   GitRepositoryService,
+  runShell,
   type GitRunResult,
   type ShellService,
 } from './git-repository-service'
@@ -215,7 +216,7 @@ async function runGit(
 ): Promise<GitRunResult> {
   try {
     const spec = shell.resolve({ command, workdir, timeoutMs, stdoutMaxBytes, signal, ...(policy ? { sandboxPolicy: policy } : {}) })
-    return await shell.run(spec)
+    return await runShell(shell, spec)
   } catch (err) {
     return { exitCode: -1, signal: null, timedOut: false, aborted: false, stdout: { text: '' }, stderr: { text: errorMessage(err) } }
   }
