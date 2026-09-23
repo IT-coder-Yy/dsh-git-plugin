@@ -50,6 +50,59 @@ test('新版 DSH shell.execute 的结果可用于仓库读取和命令诊断', a
   } finally { cleanup(dir) }
 })
 
+test('新版 shell.execute 真实执行暂存、取消、提交提议、贮藏及修改提交说明', async () => {
+  const dir = createRepo()
+  try {
+    const base = makeShell(dir)
+    const shell = {
+      resolve: base.resolve,
+      execute: async spec => ({ result: () => base.run(spec) }),
+      run: async () => { throw new Error('新版服务不应回退到 shell.run') },
+    }
+    const repository = new helpers.GitRepositoryService(shell)
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trimEnd()
+    let sequence = 0
+    const request = () => ({ sessionId: 'modern-shell', workdir: dir, operationId: 'modern-' + ++sequence })
+    const success = result => { assert.strictEqual(result.ok, true, JSON.stringify(result)); return result.data }
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'modern tracked\n')
+    fs.writeFileSync(path.join(dir, '新文件 [1].txt'), 'modern untracked\n')
+    success(await repository.stagePaths(request(), ['a.txt']))
+    assert.strictEqual(git('diff', '--cached', '--name-only'), 'a.txt')
+    success(await repository.unstagePaths(request(), ['a.txt']))
+    assert.strictEqual(git('diff', '--cached', '--name-only'), '')
+    success(await repository.stageAll(request()))
+    assert.strictEqual(git('diff', '--cached', '--name-only', '-z').split('\0').filter(Boolean).length, 2)
+    success(await repository.unstageAll(request()))
+    assert.strictEqual(git('diff', '--cached', '--name-only'), '')
+
+    const proposal = {
+      proposalId: 'modern-shell-commit', workdir: dir, status: 'pending', closed: false,
+      steps: ['git add -A', 'git commit -m "modern shell commit"'].map(command => ({ command, result: null })),
+    }
+    success(await executeRegisteredProposal(shell, proposal))
+    assert.strictEqual(git('log', '-1', '--format=%s'), 'modern shell commit')
+    assert.strictEqual(git('status', '--porcelain'), '')
+    assert.strictEqual((await executeRegisteredProposal(shell, proposal)).ok, false)
+
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'stash through execute\n')
+    success(await repository.createStash(request(), 'modern stash', ['a.txt'], false))
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'a.txt'), 'utf8'), 'modern tracked\n')
+    const stash = success(await repository.getStashes(dir))[0]
+    success(await repository.mutateStash(request(), 'pop-stash', stash.selector, stash.hash))
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'a.txt'), 'utf8'), 'stash through execute\n')
+    assert.deepStrictEqual(success(await repository.getStashes(dir)), [])
+
+    const beforeTree = git('rev-parse', 'HEAD^{tree}')
+    const snapshot = success(await repository.conflictAction('get-commit-edit-state', dir, {}))
+    success(await repository.conflictAction('amend-message', dir, {
+      token: snapshot.token, confirmRisk: true, message: 'amended through execute',
+    }, request()))
+    assert.strictEqual(git('log', '-1', '--format=%s'), 'amended through execute')
+    assert.strictEqual(git('rev-parse', 'HEAD^{tree}'), beforeTree)
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'a.txt'), 'utf8'), 'stash through execute\n')
+  } finally { cleanup(dir) }
+})
+
 test('提交流程：add+commit 两步执行 → 逐步成功 → 预期校验全部通过', async () => {
   const dir = createRepo()
   try {
