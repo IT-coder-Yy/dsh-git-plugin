@@ -866,6 +866,27 @@ interface SyncTabProps extends RepositoryTabProps {}
           })
       }
 
+      const refreshSelection = (nextSummary: RepositorySummary, refreshDiff = false): Promise<boolean> => {
+        const selection = selectedRef.current
+        if (!selection) return Promise.resolve(true)
+        const file = nextSummary.files.find((entry) => entry.path === selection.path)
+        if (!file) {
+          cancelTrackedRequest(diffRequestRef)
+          selectedRef.current = null
+          setSelected(null)
+          setDiff('')
+          return Promise.resolve(true)
+        }
+        const staged = !/^(?:DD|AU|UD|UA|DU|AA|UU)$/.test(file.indexStatus + file.workTreeStatus)
+          && !!file.indexStatus && file.indexStatus !== ' ' && file.indexStatus !== '?'
+        const unstaged = (!!file.workTreeStatus && file.workTreeStatus !== ' ') || file.indexStatus === '?'
+        const next = { path: selection.path, staged: selection.staged ? staged : !unstaged }
+        if (next.staged === selection.staged && !refreshDiff) return Promise.resolve(true)
+        selectedRef.current = next
+        setSelected(next)
+        return loadDiff(next)
+      }
+
       const load = (manual = false): Promise<boolean> => {
         if (!manual && manualRefreshRef.current) return Promise.resolve(false)
         if (manual) {
@@ -880,7 +901,7 @@ interface SyncTabProps extends RepositoryTabProps {}
               setSummary(response.data)
               setMessage('')
               setDiagnostics('')
-              return true
+              return refreshSelection(response.data, manual)
             } else {
               setMessage(actionError(response))
               setDiagnostics(actionDiagnostics(response))
@@ -893,13 +914,11 @@ interface SyncTabProps extends RepositoryTabProps {}
             setDiagnostics('')
             return false
           })
-        const selection = manual ? selectedRef.current : null
-        const diffLoad = selection ? loadDiff(selection, true) : Promise.resolve(true)
-        return Promise.all([summaryLoad, diffLoad]).then(([summarySucceeded, diffSucceeded]) => {
+        return summaryLoad.then((succeeded) => {
           const current = isTrackedRequestCurrent(summaryRequestRef, request)
-          if (manual && current) refreshFeedback.finish(summarySucceeded && diffSucceeded)
+          if (manual && current) refreshFeedback.finish(succeeded)
           if (manual) manualRefreshRef.current = false
-          return current && summarySucceeded && diffSucceeded
+          return current && succeeded
         })
       }
 
@@ -943,6 +962,7 @@ interface SyncTabProps extends RepositoryTabProps {}
               if (completeCommand) completeCommand(true)
               cancelTrackedRequest(summaryRequestRef)
               setSummary(response.data)
+              void refreshSelection(response.data, true)
               onChanged()
               return true
             }
@@ -2306,6 +2326,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
+        GitChangesTab,
         GitCommitActions,
         GitMergeTab, GitStashesTab, GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
         deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,

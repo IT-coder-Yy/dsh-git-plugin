@@ -3,17 +3,31 @@ import { GitStashesTab } from './stash-tab';
 import { GitMergeTab } from './merge-tab';
 import { GitCommitActions } from './commit-actions';
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model';
-import { registerWorkbench, requestAgentAnalysis } from './panel-controller';
+import { registerWorkbench, requestAgentAnalysis, type Dispose } from './panel-controller';
 import { appendCommandLog, analysisProposalId, beginTrackedRequest, buildAgentRepairPrompt, canDismissFailedProposal, buildFileTree, cancelTrackedRequest, commitFileTone, deriveCommitGraph, filterLocalBranches, failureContext, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, openRecoveryProposal, parseReviewRows, pendingProposalTransition, recoveryProposalId, repositoryName, shouldShowAnalysisBanner, type AnyRecord } from './view-model';
+type TimerFn = (callback: () => void, delayMs: number) => Dispose | void;
+interface RepositoryTabProps {
+    onConflicts(): void;
+    sessionId: string;
+    intervalFn?: TimerFn | null;
+    revision: number;
+    onChanged: Dispose;
+    onCommand: CommandReporter;
+    onFailure: FailureHandler;
+}
+type CommandReporter = (label: string, command: string) => (succeeded: boolean) => void;
+type FailureHandler = (response: AnyRecord) => void;
 type RefreshState = 'idle' | 'loading' | 'succeeded' | 'failed';
 declare function injectStyles(): () => void;
 declare function refreshButtonLabel(state: RefreshState): string;
 declare function renderRawDiffSurface(diff: string): any;
 declare function renderReviewSurface(diff: string): any;
+declare function GitChangesTab(props: RepositoryTabProps): any;
 declare const plugin: {
     inject: string[];
     apply(ctx: AnyRecord): void;
     __testing: {
+        GitChangesTab: typeof GitChangesTab;
         GitCommitActions: typeof GitCommitActions;
         GitMergeTab: typeof GitMergeTab;
         GitStashesTab: typeof GitStashesTab;

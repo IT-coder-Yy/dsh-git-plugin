@@ -616,6 +616,61 @@ function stashHarness(rpc, componentName = 'GitStashesTab') {
   }
 }
 
+test('变更文件暂存、取消暂存后跟随 Diff 分组，提交后清空旧 Diff 并丢弃迟到响应', async () => {
+  let files = [{ path: 'a.txt', indexStatus: ' ', workTreeStatus: 'M' }]
+  const requests = []
+  let lateDiff
+  let deferDiff = false
+  const originalFetch = global.fetch
+  global.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body)
+    requests.push(request)
+    if (request.action === 'get-diff') {
+      if (deferDiff) return new Promise(resolve => { lateDiff = () => resolve({ json: async () => ({ ok: true, data: { diff: '+late stale diff' } }) }) })
+      return { json: async () => ({ ok: true, data: { diff: request.staged ? '+staged content' : '+unstaged content' } }) }
+    }
+    if (request.action === 'stage-paths') files = [{ ...files[0], indexStatus: 'M', workTreeStatus: ' ' }]
+    if (request.action === 'unstage-paths') files = [{ ...files[0], indexStatus: ' ', workTreeStatus: 'M' }]
+    if (request.action === 'commit') files = []
+    return { json: async () => ({ ok: true, data: { files, branch: 'main', topLevel: '/test' } }) }
+  }
+  const ui = stashHarness(() => { throw new Error('Unexpected injected RPC') }, 'GitChangesTab')
+  ui.props.onFailure = result => assert.fail(JSON.stringify(result))
+  const title = () => ui.nodes().find(node => node.args[1]?.className === 'gg-intent').args[2]
+  const select = () => ui.nodes().find(node => node.args[1]?.className === 'gg-file-path').args[1].onClick()
+  try {
+    await ui.render(); await ui.render()
+    select()
+    await ui.render(); await ui.render()
+    assert.equal(title(), 'a.txt（未暂存）')
+    ui.button('原始 Diff').args[1].onClick()
+    await ui.render()
+    await ui.button('暂存').args[1].onClick()
+    await ui.render(); await ui.render()
+    assert.equal(title(), 'a.txt（已暂存）')
+    assert.equal(requests.filter(request => request.action === 'get-diff').at(-1).staged, true)
+    assert.ok(ui.nodes().some(node => node.args[2] === '+staged content'))
+    await ui.button('取消暂存').args[1].onClick()
+    await ui.render(); await ui.render()
+    assert.equal(title(), 'a.txt（未暂存）')
+    assert.equal(requests.filter(request => request.action === 'get-diff').at(-1).staged, false)
+    await ui.button('暂存').args[1].onClick()
+    await ui.render(); await ui.render()
+    ui.nodes().find(node => node.args[1]?.id === 'gg-commit-message').args[1].onChange({ target: { value: 'commit' } })
+    await ui.render()
+    deferDiff = true
+    select()
+    await ui.button('提交').args[1].onClick()
+    lateDiff()
+    await ui.render(); await ui.render()
+    assert.equal(title(), '选择文件以查看差异')
+    assert.ok(!ui.nodes().some(node => String(node.args[2]).includes('late stale diff')))
+  } finally {
+    ui.cleanup()
+    global.fetch = originalFetch
+  }
+})
+
 test('贮藏表单传递说明、精确文件选择及未跟踪选项，空选择不能提交', async () => {
   const files = [{ path: 'a.txt', indexStatus: ' ', workTreeStatus: 'M' }, { path: 'new.txt', indexStatus: '?', workTreeStatus: '?' }]
   const ui = stashHarness(async request => {
