@@ -248,10 +248,10 @@ async function runChecks(shell: ShellService | null | undefined, workdir: string
     try {
       if (c.type === 'branch') {
         const r = await runGit(shell, workdir, 'git branch --show-current', 10000, 4096)
-        pass = (r.stdout?.text ?? '').trim() === c.value
+        pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === c.value
       } else if (c.type === 'commit-msg') {
         const r = await runGit(shell, workdir, 'git log -1 --pretty=%s', 10000, 4096)
-        pass = (r.stdout?.text ?? '').trim() === c.value
+        pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === c.value
       } else if (c.type === 'staged') {
         const paths = Array.isArray(c.value) ? c.value : String(c.value).split(/\s+/).filter(Boolean)
         pass = true
@@ -261,20 +261,20 @@ async function runChecks(shell: ShellService | null | undefined, workdir: string
         }
       } else if (c.type === 'branch-gone') {
         const r = await runGit(shell, workdir, 'git branch --list ' + quoteShellArg(c.value), 10000, 4096)
-        pass = (r.stdout?.text ?? '').trim() === ''
+        pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === ''
       } else if (c.type === 'stash-nonempty') {
         const r = await runGit(shell, workdir, 'git stash list', 10000, 4096)
-        pass = (r.stdout?.text ?? '').trim().length > 0
+        pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim().length > 0
       } else if (c.type === 'stash-empty') {
         const r = await runGit(shell, workdir, 'git stash list', 10000, 4096)
-        pass = (r.stdout?.text ?? '').trim().length === 0
+        pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim().length === 0
       } else if (c.type === 'clean') {
         const paths = Array.isArray(c.value) ? c.value : String(c.value).split(/\s+/).filter(Boolean)
         const r = await runGit(shell, workdir, 'git status --porcelain -- ' + paths.map(quoteShellArg).join(' '), 10000, 4096)
         pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === ''
       } else if (c.type === 'no-ahead') {
         const r = await runGit(shell, workdir, 'git rev-list --count @{u}..HEAD 2>&1', 10000, 4096)
-        pass = (r.stdout?.text ?? '').trim() === '0'
+        pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === '0'
       }
     } catch (e) { pass = false }
     if (!pass) failed.push(c.label)

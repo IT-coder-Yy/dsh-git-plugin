@@ -17,6 +17,16 @@ const { makeShell, createRepo, cleanup } = require('./helpers')
 
 const { deriveChecks, runChecks, verifyProposal, executeProposalSteps, executeRegisteredProposal, captureFingerprint, storeProposal, findProposal, proposalView, latestPending } = helpers
 
+test('读取失败不能被当作分支删除或清空贮藏验证成功', async () => {
+  const shell = {
+    resolve: request => request,
+    run: async () => ({ exitCode: 128, stdout: { text: '' }, stderr: { text: 'fatal: not a git repository' } }),
+  }
+  const checks = deriveChecks(['git branch -d topic', 'git stash clear'])
+  assert.ok(checks.length >= 2)
+  assert.deepEqual(await runChecks(shell, '/missing', checks), checks.map(check => check.label))
+})
+
 function callHttp(handler, body) {
   return new Promise((resolve) => {
     const req = new EventEmitter()
