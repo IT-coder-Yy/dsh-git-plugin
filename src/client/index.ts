@@ -2,6 +2,7 @@ import { GitConflictsTab } from './conflict-tab'
 import { GitStashesTab } from './stash-tab'
 import { GitMergeTab } from './merge-tab'
 import { GitCommitActions } from './commit-actions'
+import { sideChatSessions } from './side-chat'
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model'
 /**
  * dsh-easygit-plugin Client half as a static Cordis plugin package.
@@ -77,6 +78,7 @@ interface GitWorkbenchPanelProps {
   sessionId: string
   close: Dispose
   sendPrompt(text: string): Promise<void>
+  renderChat(): unknown
   intervalFn?: TimerFn | null
   timeoutFn?: TimerFn | null
 }
@@ -446,6 +448,12 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-tab:active:not(:disabled) { transform: translateY(1px); }
         .gg-tab-content { gap: 12px; padding-top: 12px; }
         .gg-tab-panel { min-height: 0; }
+        .gg-workbench-body.gg-with-chat { display: flex; flex-direction: column; overflow: hidden; }
+        .gg-with-chat > .gg-tab-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .gg-side-chat { height: 62%; min-height: 220px; max-height: 85%; flex: none; display: flex; flex-direction: column; overflow: auto; resize: vertical; border-bottom: 1px solid var(--gg-border); font-family: var(--dsw-font-family, sans-serif); }
+        .gg-side-chat > :last-child { min-height: 0; flex: 1; }
+        .gg-chat-head { flex: none; padding: 6px 0; font-size: 12px; color: var(--gg-text-muted); }
+        .gg-suggestions { min-height: 90px; flex: 1; overflow: auto; }
         .gg-tab-toolbar { min-height: 34px; gap: 8px; }
         .gg-tab-toolbar > .gg-idletext:first-child, .gg-repository-identity { margin-right: auto; }
         .gg-section-heading { margin-right: auto; color: var(--gg-text); font-size: 14px; line-height: 22px; font-weight: 680; letter-spacing: -.01em; }
@@ -1952,7 +1960,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         renderFailureDetails(pendingAnalysis.failure),
         pendingAnalysis.error ? React.createElement('div', { className: 'gg-workbench-error' }, pendingAnalysis.error) : null,
         React.createElement('div', { className: 'gg-idletext' }, pendingAnalysis.status === 'waiting'
-          ? '已发送给当前会话 Agent；它生成可执行提议后会自动跳转到建议页。'
+          ? '已发送给 Git 侧边助手；生成的命令会显示在下方。'
           : '确认后，Agent 会读取仓库、文件和远程跟踪状态，仅生成修复提议，不会直接执行。'),
         pendingAnalysis.status !== 'waiting' ? React.createElement('div', { className: 'gg-actions' },
           React.createElement('button', {
@@ -1972,7 +1980,7 @@ interface SyncTabProps extends RepositoryTabProps {}
             type: 'button', className: 'gg-btn gg-workbench-close', title: '关闭 Git 工作台', 'aria-label': '关闭 Git 工作台', onClick: props.close,
           }, '×'),
         ),
-        React.createElement('div', { className: 'gg-workbench-body' },
+        React.createElement('div', { className: 'gg-workbench-body' + (tab === 'proposal' ? ' gg-with-chat' : '') },
           React.createElement('div', { className: 'gg-tabs', role: 'tablist', 'aria-label': 'Git 工作台区域' }, tabs.map((entry: { id: string; label: string }, index: number) => React.createElement('button', {
             className: 'gg-tab' + (tab === entry.id ? ' active' : ''), type: 'button', role: 'tab',
             id: 'gg-tab-' + entry.id, 'aria-controls': 'gg-panel-' + entry.id,
@@ -1981,7 +1989,8 @@ interface SyncTabProps extends RepositoryTabProps {}
           }, entry.label))),
           React.createElement('div', {
             className: 'gg-tab-panel', id: 'gg-panel-' + tab, role: 'tabpanel', 'aria-labelledby': 'gg-tab-' + tab,
-          }, analysisBanner, content),
+          }, tab === 'proposal' ? props.renderChat() : null,
+          tab === 'proposal' ? React.createElement('div', { className: 'gg-suggestions' }, analysisBanner, content) : content),
         ),
         React.createElement('section', { className: 'gg-command-log', 'aria-label': '命令日志' },
           React.createElement('strong', { className: 'gg-command-log-head' }, '命令日志'),
@@ -2125,6 +2134,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         rpc({ action: 'execute', sessionId: String(sessionId), proposalId: proposal.proposalId, confirm: understood })
           .then((res) => {
             setOutcome(res || { ok: false, error: '无返回' })
+            if (res?.feedbackError) setVerifyMsg(res.feedbackError)
             if (res && res.ok === true) scheduleClose(proposal.proposalId)
             else if (res) {
               props.onFailure(res as AnyRecord)
@@ -2322,7 +2332,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         }))
         slots.inject('conversation.input.left', () => slots.register(
           { name: 'conversation.input.left', id: 'git-workbench', order: 30, label: 'Git 工作台' },
-          (props: AnyRecord) => React.createElement(GitWorkbenchAction, { sessionId: props.sessionId, openWorkbench, intervalFn }),
+          (props: AnyRecord) => sideChatSessions.has(props.sessionId) ? null : React.createElement(GitWorkbenchAction, { sessionId: props.sessionId, openWorkbench, intervalFn }),
         ))
       },
       __testing: {

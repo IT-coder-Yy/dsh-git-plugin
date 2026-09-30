@@ -26,7 +26,7 @@ function loadClientPlugin(reactOverrides = {}) {
   return clientPlugin
 }
 
-test('Client 注册原生右栏标签、工具栏入口并释放类型', async () => {
+test('Client 注册原生右栏标签、工具栏入口并将分析隔离到侧会话', async (t) => {
   const clientPlugin = loadClientPlugin()
   assert.deepStrictEqual(clientPlugin.inject, ['slots', 'timer', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'conversation'])
   const registrations = []
@@ -44,7 +44,10 @@ test('Client 注册原生右栏标签、工具栏入口并释放类型', async (
     timer: { interval: () => () => {}, timeout: () => () => {} },
     sidebarRightTabs: { register(definition) { types.push(definition); return () => { released = true } } },
     sidebarRight: { openTabIn: (...args) => opened.push(args) },
-    sessions: { scope: (id) => ({ conversation: { send: async (text) => { sent.push([id, text]) } } }) },
+    sessions: {
+      scope: (id) => ({ get: key => { assert.strictEqual(key, 'conversation'); return { send: async (text) => { sent.push([id, text]) } } } }),
+      using: async (id, options, fn) => { assert.strictEqual(id, 'git-child-b'); return fn({ ready: Promise.resolve() }) },
+    },
   }
   clientPlugin.apply({ get: (key) => services[key], effect: (callback) => { releases.push(callback()) } })
   assert.strictEqual(types[0].id, 'dsh-easygit-plugin')
@@ -64,8 +67,16 @@ test('Client 注册原生右栏标签、工具栏入口并释放类型', async (
   assert.strictEqual(panel.args[1].sessionId, 'session-b')
   panel.args[1].close()
   assert.strictEqual(closed, 1)
+  t.mock.method(global, 'fetch', async (url, options) => {
+    assert.strictEqual(url, '/easygit')
+    assert.deepStrictEqual(JSON.parse(options.body), { action: 'side-chat', sessionId: 'session-b' })
+    return { json: async () => ({ ok: true, sessionId: 'git-child-b' }) }
+  })
+  assert.deepStrictEqual(body.definition.children, { 'easygit.chat': { kind: 'single', scope: 'session' } })
+  assert.ok(registrations.some(({ definition }) => definition.name === 'easygit.chat'))
+  assert.strictEqual(panel.args[1].renderChat().args[1].sessionId, 'session-b')
   await panel.args[1].sendPrompt('分析 Git 失败')
-  assert.deepStrictEqual(sent, [['session-b', '分析 Git 失败']])
+  assert.deepStrictEqual(sent, [['git-child-b', '分析 Git 失败']])
   tab.visible = false
   assert.strictEqual(body.renderer({ sessionId: 'session-b', useTabInfo: () => ({ tab }) }), null)
   for (const release of releases) if (typeof release === 'function') release()
@@ -75,7 +86,7 @@ test('Client 注册原生右栏标签、工具栏入口并释放类型', async (
 test('Agent 分析通过指定会话发送并传播会话缺失及业务错误', async () => {
   const { requestAgentAnalysis } = loadClientPlugin().__testing
   await assert.rejects(requestAgentAnalysis({ scope: () => undefined }, 'missing', '分析'), /当前会话不可用/)
-  await assert.rejects(requestAgentAnalysis({ scope: () => ({ conversation: { send: async () => { throw new Error('admission denied') } } }) }, 'session-a', '分析'), /admission denied/)
+  await assert.rejects(requestAgentAnalysis({ scope: () => ({ get: () => ({ send: async () => { throw new Error('admission denied') } }) }) }, 'session-a', '分析'), /admission denied/)
 })
 
 test('变更文件按目录树归类，并保留根目录文件', () => {

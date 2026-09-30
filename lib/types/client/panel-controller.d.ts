@@ -7,4 +7,5 @@ export declare function registerWorkbench(ctx: AnyRecord, renderPanel: (props: {
     sessionId: string;
     close: Dispose;
     sendPrompt(text: string): Promise<void>;
+    renderChat(): unknown;
 }) => unknown): (sessionId: string) => void;
