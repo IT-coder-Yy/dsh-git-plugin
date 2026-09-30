@@ -1,3 +1,4 @@
+import type { StoredProposal } from './proposal-service';
 type Runtime = Record<string, any>;
 /** Native DSH sessions own history; this service owns only parent links and synchronization. */
 export declare class SideChatService {
@@ -17,6 +18,13 @@ export declare class SideChatService {
         sessionId: string;
     }>;
     private delta;
+    requestAnalysis(proposal: StoredProposal, persist: () => Promise<void>, retry?: boolean): Promise<void>;
+    cancel(parent: string): Promise<void>;
+    status(parent: string, since?: number): Promise<{
+        running: boolean;
+        reply: string;
+        error?: string;
+    }>;
     feedback(parent: string, proposalId: string, result: unknown): Promise<void>;
 }
 export {};

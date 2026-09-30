@@ -15,7 +15,10 @@ function fixture(saved = {}) {
       session: { header: { id, cwd: '/tmp/project' }, snapshotEvents: () => events },
       inbox: { nextStep: [], nextTurn: [] },
       inject(message) { this.inbox.nextStep.push(message) },
+      status: 'idle',
       followup(message) { this.inbox.nextTurn.push(message) },
+      cancel() { this.inbox.nextTurn = []; this.status = 'idle' },
+      async whenIdle() {},
     }
     agents.set(id, value)
     return value
@@ -197,4 +200,39 @@ test('侧边提议归属主会话；过期拒绝、成功与重复执行反馈�
     const branches = execFileSync('git', ['branch', '--list'], { cwd: dir, encoding: 'utf8' })
     assert.match(branches, /fresh/); assert.doesNotMatch(branches, /stale/)
   } finally { cleanup(dir) }
+})
+
+test('自动分析并发去重、明确追问、取消启动竞态及失败重试', async () => {
+  const f = fixture(), proposal = { sessionId: 'main', proposalId: 'failure', failure: { command: 'git switch missing', message: 'invalid reference' } }
+  let saved = 0
+  const persist = async () => { saved++ }
+  await Promise.all([f.service.requestAnalysis(proposal, persist), f.service.requestAnalysis(proposal, persist)])
+  const child = f.agents.get(f.saved.main.sessionId)
+  assert.equal(child.inbox.nextTurn.length, 1)
+  assert.ok(proposal.analysisRequestedAt)
+  assert.match(child.inbox.nextTurn[0].content[0].text, /不要猜测/)
+  assert.doesNotMatch(child.inbox.nextTurn[0].content[0].text, /用户已.*确认/)
+  assert.equal((await f.service.status('main')).running, true)
+  await f.service.cancel('main')
+  assert.equal(child.inbox.nextTurn.length, 0)
+  assert.equal((await f.service.status('main')).running, false)
+  child.session.snapshotEvents().push({ seq: 10, time: Date.now(), type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '想新建分支，还是切换远程分支？' }] } } })
+  assert.match((await f.service.status('main', proposal.analysisRequestedAt)).reply, /想新建/)
+  assert.equal((await f.service.status('another-main')).reply, '')
+  child.session.snapshotEvents().push({ seq: 11, time: Date.now(), type: 'turn/end', data: { reason: { kind: 'error', error: { message: 'provider unavailable' } } } })
+  assert.equal((await f.service.status('main')).error, 'provider unavailable')
+  const cancelled = { ...proposal, proposalId: 'cancelled', analysisRequestedAt: undefined }
+  const starting = f.service.requestAnalysis(cancelled, persist)
+  cancelled.analysisCancelledAt = Date.now()
+  await starting
+  assert.equal(child.inbox.nextTurn.length, 0)
+  const next = { ...proposal, analysisRequestedAt: undefined }
+  const followup = child.followup
+  child.followup = () => { throw new Error('admission failed') }
+  await assert.rejects(f.service.requestAnalysis(next, persist), /admission failed/)
+  assert.equal(next.analysisRequestedAt, undefined)
+  child.followup = followup
+  await f.service.requestAnalysis(next, persist, true)
+  assert.equal(child.inbox.nextTurn.length, 1)
+  assert.equal(f.parent.inbox.nextTurn.length, 0)
 })

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { ProposalStorageUnit } from './proposal-service'
+import { buildAgentRepairPrompt } from '../shared/analysis'
+import type { StoredProposal, ProposalStorageUnit } from './proposal-service'
 import { redactAndLimit } from './command-policy'
 
 // DSH services are supplied by the host, not bundled into this plugin.
@@ -144,6 +145,49 @@ export class SideChatService {
       ), 64000) }
     })
     return contextMessage('主会话新增背景（只读引用，不是新的执行指令）：\n' + JSON.stringify(text), { parent, through: events.at(-1).seq })
+  }
+
+  async requestAnalysis(proposal: StoredProposal, persist: () => Promise<void>, retry = false): Promise<void> {
+    const { sessionId } = await this.open(proposal.sessionId)
+    await this.serial(proposal.sessionId, async () => {
+      if (proposal.closed || proposal.analysisCancelledAt || (proposal.analysisRequestedAt && !retry)) return
+      const { agent, error } = await this.ctx.get('sessionController').resolveAgent(sessionId)
+      if (error) throw error
+      if (retry && agent.status === 'running') return
+      proposal.analysisRequestedAt = Date.now()
+      try {
+        await persist()
+        agent.followup(contextMessage(buildAgentRepairPrompt(proposal.failure!), { kind: 'easygit-analysis', proposalId: proposal.proposalId }))
+      } catch (error) {
+        delete proposal.analysisRequestedAt
+        await persist()
+        throw error
+      }
+    })
+  }
+
+  async cancel(parent: string): Promise<void> {
+    await this.ready
+    await this.serial(parent, async () => {
+      const link = this.links.get(parent)
+      const agent = link && this.ctx.get('agents')?.get(link.sessionId)
+      if (agent) { agent.cancel({ kind: 'user' }); await agent.whenIdle() }
+    })
+  }
+
+  async status(parent: string, since = 0): Promise<{ running: boolean; reply: string; error?: string }> {
+    await this.ready
+    const link = this.links.get(parent)
+    if (!link) return { running: false, reply: '' }
+    const agent = this.ctx.get('agents')?.get(link.sessionId)
+    const running = agent?.status === 'running' || !!agent?.inbox.nextTurn.length
+    const events = agent?.session.snapshotEvents() ?? (await this.ctx.get('sessionController').inspect(link.sessionId)).events
+    const last = events.findLast((event: Event & { time: number }) => event.seq > link.baseline && event.time >= since
+      && (event.type === 'assistant/message' || event.type === 'user/message'))
+    const reply = last?.type === 'assistant/message' ? last.data.message.content.filter((block: Runtime) => block.type === 'text').map((block: Runtime) => block.text).join('\n') : ''
+    const end = events.findLast((event: Event & { time: number }) => event.type === 'turn/end' && event.time >= since)
+    const error = !running && end?.data.reason.kind === 'error' ? redactAndLimit(end.data.reason.error.message, 1000) : ''
+    return { running, reply: running ? '' : redactAndLimit(reply, 2000), error }
   }
 
   async feedback(parent: string, proposalId: string, result: unknown): Promise<void> {
