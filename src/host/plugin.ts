@@ -11,6 +11,7 @@
 
 import { registerEasyGitActions, type WebServerService, type ConnectionService } from './actions'
 import { SideChatService } from './side-chat'
+import { generateCommitMessage } from './commit-message'
 import type { GitFailureContext } from '../shared/contracts'
 import {
   ProposalService,
@@ -882,6 +883,7 @@ const plugin = {
       repository,
       proposalStorageReady,
       openChat: (sessionId) => chats.open(sessionId),
+      generateCommitMessage: (sessionId, context) => generateCommitMessage(ctx, repository, sessionId, context.workdir, context.policy),
       shell,
       repositoryContext: (sessionId) => repositoryContextForSession(ctx, sandboxPolicy, sessionId),
       latestPending,

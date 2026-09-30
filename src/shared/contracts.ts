@@ -313,6 +313,7 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
 }
 
 export interface EasyGitRequestMap {
+  'generate-commit-message': { sessionId: string }
   'side-chat': { sessionId: string }
   'get-commit-edit-state': { sessionId: string }
   'amend-message': CommitEditRequest & { message: string }
@@ -365,6 +366,7 @@ export interface EasyGitRequestMap {
 }
 
 export interface EasyGitResponseMap {
+  'generate-commit-message': ActionResult<{ message: string }>
   'side-chat': { ok: true; sessionId: string } | { ok: false; error: string }
   'get-commit-edit-state': ActionResult<CommitEditState>
   'amend-message': ActionResult<ConflictState>

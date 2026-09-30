@@ -35,6 +35,7 @@ interface EasyGitActionDependencies {
   repository: GitRepositoryService
   proposalStorageReady: Promise<void>
   openChat?(sessionId: string): Promise<unknown>
+  generateCommitMessage?(sessionId: string, context: RepositoryContext): Promise<unknown>
   shell: ShellService | null
   repositoryContext(sessionId: string): Promise<RepositoryContext | null>
   latestPending(sessionId: string): StoredProposal | null
@@ -61,6 +62,7 @@ interface EasyGitActionDependencies {
 }
 
 const REPOSITORY_ACTIONS = [
+  'generate-commit-message',
   'get-commit-edit-state',
   'amend-message',
   'amend-commit',
@@ -222,7 +224,10 @@ async function dispatchRepositoryAction(
   dependencies: EasyGitActionDependencies,
 ): Promise<unknown> {
   if (!context) return { ok: false, code: 'SESSION_NOT_FOUND', message: '无法确定当前会话的仓库目录' }
-
+  if (action === 'generate-commit-message') {
+    if (!dependencies.generateCommitMessage) throw new Error('提交说明生成服务不可用')
+    return dependencies.generateCommitMessage(sessionId, context)
+  }
   const repository = dependencies.repository
   const base = { sessionId, workdir: context.workdir, operationId: body.operationId, sandboxPolicy: context.policy }
   if (action === 'get-commit-edit-state') return repository.conflictAction(action, context.workdir, body, undefined, context.policy)

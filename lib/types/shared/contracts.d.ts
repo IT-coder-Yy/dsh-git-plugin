@@ -288,6 +288,9 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
     analysis?: AgentAnalysisRequest;
 }
 export interface EasyGitRequestMap {
+    'generate-commit-message': {
+        sessionId: string;
+    };
     'side-chat': {
         sessionId: string;
     };
@@ -513,6 +516,9 @@ export interface EasyGitRequestMap {
     };
 }
 export interface EasyGitResponseMap {
+    'generate-commit-message': ActionResult<{
+        message: string;
+    }>;
     'side-chat': {
         ok: true;
         sessionId: string;

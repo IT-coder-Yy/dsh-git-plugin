@@ -29,6 +29,7 @@ interface EasyGitActionDependencies {
     repository: GitRepositoryService;
     proposalStorageReady: Promise<void>;
     openChat?(sessionId: string): Promise<unknown>;
+    generateCommitMessage?(sessionId: string, context: RepositoryContext): Promise<unknown>;
     shell: ShellService | null;
     repositoryContext(sessionId: string): Promise<RepositoryContext | null>;
     latestPending(sessionId: string): StoredProposal | null;

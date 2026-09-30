@@ -45,6 +45,72 @@ function callHttp(handler, body) {
   })
 }
 
+test('AI 提交说明接口使用暂存内容、项目背景和会话模型；拒绝无效及过期结果', async () => {
+  const dir = createRepo()
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+  let route, calls = 0, request, disposed = 0
+  let answer = 'feat(core): 增加暂存功能', finish = 'stop', duringGeneration = () => {}
+  const selection = { provider: 'test-provider', model: 'session-model', reasoningEffort: 'high' }
+  const services = {
+    shell: makeShell(dir),
+    agents: { get: id => id === 'commit-message-session' ? { session: { cwd: dir } } : undefined },
+    sessionQuery: { observeSession: async id => {
+      if (id !== 'commit-message-session') throw new Error('Session not found')
+      return { projections: { values: { modelSelection: { next: selection } } }, [Symbol.dispose]() { disposed++ } }
+    } },
+    llm: { async *stream(options) {
+      calls++; request = options
+      duringGeneration()
+      yield { type: 'reasoning-delta', text: '不应进入提交说明' }
+      yield { type: 'text-delta', text: answer }
+      yield { type: 'finish', reason: { kind: finish, failure: { message: '模型不可用' } } }
+    } },
+  }
+  try {
+    plugin.apply({ get: key => services[key], inject: (_deps, callback) => callback({ get: key => key === 'connection' ? { requestRejection: () => undefined } : { register: definition => { route = definition } } }) })
+    const generate = async (sessionId = 'commit-message-session') => (await callHttp(route.handler, { action: 'generate-commit-message', sessionId })).body
+    assert.equal((await generate('unknown-session')).code, 'SESSION_NOT_FOUND')
+    assert.equal((await generate()).code, 'STATE_CONFLICT')
+    assert.equal(calls, 0)
+    fs.writeFileSync(path.join(dir, 'README.md'), 'project-purpose-marker\n')
+    git('add', 'README.md'); git('commit', '-qm', 'docs: describe project')
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'staged-marker\n')
+    git('add', 'a.txt')
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'unstaged-marker\n')
+    const before = git('status', '--porcelain')
+    const head = git('rev-parse', 'HEAD')
+    assert.deepEqual(await generate(), { ok: true, data: { message: answer } })
+    assert.equal(request.model, selection.model)
+    assert.equal(request.provider, selection.provider)
+    assert.equal(request.reasoningEffort, 'high')
+    assert.ok(request.signal instanceof AbortSignal)
+    assert.match(request.messages[0].content[0].text, /staged-marker/)
+    assert.doesNotMatch(request.messages[0].content[0].text, /unstaged-marker/)
+    assert.match(request.messages[0].content[0].text, /project-purpose-marker/)
+    assert.match(request.messages[0].content[0].text, /docs: describe project/)
+    assert.equal(disposed, 1)
+    assert.equal(git('status', '--porcelain'), before)
+    assert.equal(git('rev-parse', 'HEAD'), head)
+    for (const invalid of ['普通说明', 'feat: 第一行\n额外解释', '', '```\nfeat: 功能\n```']) {
+      answer = invalid
+      assert.match((await generate()).message, /约定式提交/)
+    }
+    answer = 'fix: 修复功能'; finish = 'error'
+    assert.match((await generate()).message, /模型不可用/)
+    finish = 'max-tokens'
+    assert.equal((await generate()).ok, false)
+    finish = 'stop'
+    duringGeneration = () => git('add', 'a.txt')
+    assert.match((await generate()).message, /暂存区已变化/)
+    duringGeneration = () => {}
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'large'.repeat(15_000))
+    git('add', 'a.txt')
+    const previousCalls = calls
+    assert.match((await generate()).message, /变更过大/)
+    assert.equal(calls, previousCalls)
+  } finally { cleanup(dir) }
+})
+
 test('新版 DSH shell.execute 的结果可用于仓库读取和命令诊断', async () => {
   const dir = createRepo()
   try {
