@@ -13,7 +13,7 @@ import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './
  * native right-sidebar tab and controlled from the composer tool row.
  */
 const React = require('react')
-import { registerWorkbench, requestAgentAnalysis, type Dispose } from './panel-controller'
+import { registerWorkbench, type Dispose } from './panel-controller'
 import {
   appendCommandLog,
   analysisProposalId,
@@ -77,8 +77,7 @@ interface GitWorkbenchActionProps {
 interface GitWorkbenchPanelProps {
   sessionId: string
   close: Dispose
-  sendPrompt(text: string): Promise<void>
-  renderChat(): unknown
+  renderChat(expanded: boolean): unknown
   intervalFn?: TimerFn | null
   timeoutFn?: TimerFn | null
 }
@@ -453,6 +452,8 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-workbench-body.gg-with-chat { display: flex; flex-direction: column; overflow: hidden; }
         .gg-with-chat > .gg-tab-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         .gg-side-chat { height: 62%; min-height: 220px; max-height: 85%; flex: none; display: flex; flex-direction: column; overflow: auto; resize: vertical; border-bottom: 1px solid var(--gg-border); font-family: var(--dsw-font-family, sans-serif); }
+        .gg-side-chat[hidden] { display: none; }
+        .gg-chat-toggle { align-self: flex-start; flex: none; margin-bottom: 8px; }
         .gg-side-chat > :last-child { min-height: 0; flex: 1; }
         .gg-chat-head { flex: none; padding: 6px 0; font-size: 12px; color: var(--gg-text-muted); }
         .gg-suggestions { min-height: 90px; flex: 1; overflow: auto; }
@@ -1814,6 +1815,8 @@ interface SyncTabProps extends RepositoryTabProps {}
 
     function GitWorkbenchPanel(props: GitWorkbenchPanelProps) {
       const [tab, setTab] = React.useState('changes')
+      const [chatExpanded, setChatExpanded] = React.useState(false)
+      const [chat, setChat] = React.useState({ running: false, reply: '', error: '' })
       const [conflictDirty, setConflictDirty] = React.useState(false)
       const conflictDirtyRef = React.useRef(false)
       conflictDirtyRef.current = conflictDirty
@@ -1822,12 +1825,13 @@ interface SyncTabProps extends RepositoryTabProps {}
       const [pendingAnalysis, setPendingAnalysis] = React.useState(null as null | {
         proposalId: string
         failure: GitFailureContext
-        status: 'ready' | 'requesting' | 'waiting' | 'dismissing'
+        status: 'ready' | 'requesting' | 'waiting' | 'finished' | 'error'
         error: string
       })
       const commandSeqRef = React.useRef(0)
       const commandLogBodyRef = React.useRef(null)
       const delayedOpenDisposers = React.useRef([])
+      const observedFailureRef = React.useRef(null as string | null)
       const observedProposalIdRef = React.useRef(null as string | null)
       const proposalStateRequestRef = React.useRef({ controller: null, sequence: 0 } as RequestSlot)
       const refresh = () => setRevision((current: number) => current + 1)
@@ -1854,36 +1858,31 @@ interface SyncTabProps extends RepositoryTabProps {}
         }
         const proposalId = analysisProposalId(response)
         const failure = failureContext(response)
-        if (proposalId && failure) setPendingAnalysis({ proposalId, failure, status: 'ready', error: '' })
+        if (proposalId && failure) {
+          setPendingAnalysis({ proposalId, failure, status: 'ready', error: '' })
+          if (!conflictDirtyRef.current) setTab('proposal')
+        }
       }
-      const requestAnalysis = () => {
+      const requestAnalysis = (retry = false) => {
         const current = pendingAnalysis
-        if (!current || current.status !== 'ready') return
+        if (!current) return
         setPendingAnalysis({ ...current, status: 'requesting', error: '' })
-        rpc({ action: 'request-analysis', sessionId: props.sessionId, proposalId: current.proposalId })
+        rpc({ action: 'request-analysis', sessionId: props.sessionId, proposalId: current.proposalId, retry })
           .then((response) => {
-            if (!response || response.ok !== true) throw new Error(String(response?.error || '无法标记分析请求'))
-            return props.sendPrompt(buildAgentRepairPrompt(current.failure))
+            if (!response?.ok) throw new Error(response?.error || '无法启动分析')
+            setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId && active.status === 'requesting'
+              ? { ...active, status: 'waiting' } : active)
           })
-          .then(() => setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId
-            ? { ...active, status: 'waiting', error: '' }
-            : active))
-          .catch((error) => setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId
-            ? { ...active, status: 'ready', error: errorText(error) }
-            : active))
+          .catch(error => setPendingAnalysis((active: AnyRecord | null) => active?.proposalId === current.proposalId
+            ? { ...active, status: 'error', error: errorText(error) } : active))
       }
-      const abandonAnalysis = () => {
-        const current = pendingAnalysis
-        if (!current || current.status !== 'ready') return
-        setPendingAnalysis({ ...current, status: 'dismissing', error: '' })
-        rpc({ action: 'dismiss', sessionId: props.sessionId, proposalId: current.proposalId })
-          .then((response) => {
-            if (!response || response.ok !== true) throw new Error(String(response?.error || '无法放弃分析'))
-            setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId ? null : active)
-          })
-          .catch((error) => setPendingAnalysis((active: AnyRecord | null) => active && active.proposalId === current.proposalId
-            ? { ...active, status: 'ready', error: errorText(error) }
-            : active))
+      const cancelAnalysis = () => {
+        rpc({ action: 'cancel-analysis', sessionId: props.sessionId, proposalId: pendingAnalysis?.proposalId })
+          .then(response => {
+            if (!response?.ok) throw new Error(response?.error || '无法取消分析')
+            setChat({ running: false, reply: '', error: '' })
+            setPendingAnalysis((active: AnyRecord | null) => active ? { ...active, status: 'finished', error: '' } : active)
+          }).catch(error => setChat((active: AnyRecord) => ({ ...active, error: errorText(error) })))
       }
       const reportCommand: CommandReporter = (label, command) => {
         commandSeqRef.current += 1
@@ -1902,14 +1901,22 @@ interface SyncTabProps extends RepositoryTabProps {}
         setCommandLogs([])
         commandSeqRef.current = 0
         setPendingAnalysis(null)
+        setChatExpanded(false)
+        setChat({ running: false, reply: '', error: '' })
         observedProposalIdRef.current = null
+        observedFailureRef.current = null
       }, [props.sessionId])
+      React.useEffect(() => {
+        if (pendingAnalysis?.status === 'ready') requestAnalysis()
+      }, [pendingAnalysis?.proposalId, pendingAnalysis?.status])
       React.useEffect(() => {
         const check = () => {
           const request = beginTrackedRequest(proposalStateRequestRef)
           rpc({ action: 'state', sessionId: props.sessionId }, request.signal)
             .then((response) => {
               if (!isTrackedRequestCurrent(proposalStateRequestRef, request)) return
+              if (!response?.ok) throw new Error(response?.error || '无法读取分析状态')
+              if (response.chat) setChat({ ...response.chat, error: response.chat.error || '' })
               const proposal = response && response.ok === true ? response.proposal : null
               const transition = pendingProposalTransition(observedProposalIdRef.current, proposal)
               observedProposalIdRef.current = transition.proposalId
@@ -1919,18 +1926,22 @@ interface SyncTabProps extends RepositoryTabProps {}
                 return
               }
               if (proposal && proposal.status === 'failed' && proposal.needsAgentAnalysis && proposal.failure) {
+                if (observedFailureRef.current !== proposal.proposalId) {
+                  observedFailureRef.current = proposal.proposalId
+                  if (!conflictDirtyRef.current) setTab('proposal')
+                }
                 setPendingAnalysis((active: AnyRecord | null) => {
-                  if (active && active.proposalId === proposal.proposalId) return active
+                  if (active?.proposalId === proposal.proposalId && ['ready', 'requesting', 'error'].includes(active.status)) return active
                   return {
                     proposalId: proposal.proposalId,
                     failure: proposal.failure,
-                    status: proposal.analysisRequestedAt ? 'waiting' : 'ready',
+                    status: proposal.analysisCancelledAt ? 'finished' : proposal.analysisRequestedAt ? (response?.chat?.running ? 'waiting' : 'finished') : 'ready',
                     error: '',
                   }
                 })
-              }
+              } else setPendingAnalysis(null)
             })
-            .catch((error) => { if (!isAbortError(error)) { /* 下一轮重试 */ } })
+            .catch((error) => { if (!isAbortError(error)) setChat((active: AnyRecord) => ({ ...active, error: '读取分析状态失败：' + errorText(error) })) })
         }
         check()
         if (props.intervalFn) {
@@ -1994,21 +2005,18 @@ interface SyncTabProps extends RepositoryTabProps {}
               : tab === 'sync'
                 ? React.createElement(GitSyncTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure, onConflicts: () => setTab('conflicts') })
                 : React.createElement(GitDock, { sessionId: props.sessionId, intervalFn: props.intervalFn, timeoutFn: props.timeoutFn, onFailure: handleFailure, onCommand: reportCommand })
-      const analysisBanner = shouldShowAnalysisBanner(tab, pendingAnalysis) && pendingAnalysis ? React.createElement('div', { className: 'gg-analysis' },
-        React.createElement('strong', null, pendingAnalysis.status === 'waiting' ? 'Agent 正在分析 Git 失败…' : '这个 Git 失败需要 Agent 分析'),
-        renderFailureDetails(pendingAnalysis.failure),
-        pendingAnalysis.error ? React.createElement('div', { className: 'gg-workbench-error' }, pendingAnalysis.error) : null,
-        React.createElement('div', { className: 'gg-idletext' }, pendingAnalysis.status === 'waiting'
-          ? '已发送给 Git 侧边助手；生成的命令会显示在下方。'
-          : '确认后，Agent 会读取仓库、文件和远程跟踪状态，仅生成修复提议，不会直接执行。'),
-        pendingAnalysis.status !== 'waiting' ? React.createElement('div', { className: 'gg-actions' },
-          React.createElement('button', {
-            className: 'gg-btn primary', type: 'button', disabled: pendingAnalysis.status !== 'ready', onClick: requestAnalysis,
-          }, pendingAnalysis.status === 'requesting' ? '正在请求…' : '确认并让 Agent 分析'),
-          React.createElement('button', {
-            className: 'gg-btn', type: 'button', disabled: pendingAnalysis.status !== 'ready', onClick: abandonAnalysis,
-          }, pendingAnalysis.status === 'dismissing' ? '正在放弃…' : '放弃分析'),
-        ) : null,
+      const analyzing = chat.running || pendingAnalysis?.status === 'requesting' || pendingAnalysis?.status === 'waiting'
+      const analysisBanner = tab === 'proposal' && (pendingAnalysis || chat.running || chat.reply || chat.error) ? React.createElement('div', { className: 'gg-analysis', role: 'status' },
+        React.createElement('strong', null, analyzing ? '正在分析 Git 问题…' : (pendingAnalysis?.status === 'error' || chat.error) ? '自动分析失败' : chat.reply ? '助手回复 · 可展开聊天继续讨论' : '分析已停止或未完成'),
+        pendingAnalysis ? renderFailureDetails(pendingAnalysis.failure) : null,
+        chat.reply && !chatExpanded ? React.createElement('div', { style: { whiteSpace: 'pre-wrap' } }, chat.reply) : null,
+        (pendingAnalysis?.error || chat.error) ? React.createElement('div', { role: 'alert', className: 'gg-workbench-error' }, pendingAnalysis?.error || chat.error) : null,
+        analyzing ? React.createElement('div', { className: 'gg-idletext' }, '助手正在读取信息并分析；修改命令仍需你点击确认执行。') : null,
+        React.createElement('div', { className: 'gg-actions' },
+          analyzing ? React.createElement('button', { className: 'gg-btn', onClick: cancelAnalysis }, '取消分析') : null,
+          !analyzing && pendingAnalysis ? React.createElement('button', { className: 'gg-btn', onClick: () => requestAnalysis(true) }, '重新分析') : null,
+          React.createElement('button', { className: 'gg-btn', onClick: () => setChatExpanded(true) }, '展开聊天 / 补充信息'),
+        ),
       ) : null
       return React.createElement('aside', {
         className: 'gg-workbench', 'aria-label': 'Git 工作台',
@@ -2028,8 +2036,9 @@ interface SyncTabProps extends RepositoryTabProps {}
           }, entry.label))),
           React.createElement('div', {
             className: 'gg-tab-panel', id: 'gg-panel-' + tab, role: 'tabpanel', 'aria-labelledby': 'gg-tab-' + tab,
-          }, tab === 'proposal' ? props.renderChat() : null,
-          tab === 'proposal' ? React.createElement('div', { className: 'gg-suggestions' }, analysisBanner, content) : content),
+          }, tab === 'proposal' ? React.createElement('button', { className: 'gg-btn gg-chat-toggle', 'aria-expanded': chatExpanded, onClick: () => setChatExpanded(!chatExpanded) }, chatExpanded ? '收起聊天' : '展开 Git 助手聊天') : null,
+          tab === 'proposal' ? props.renderChat(chatExpanded) : null,
+          tab === 'proposal' ? React.createElement('div', { className: 'gg-suggestions' }, analysisBanner, pendingAnalysis ? null : content) : content),
         ),
         React.createElement('section', { className: 'gg-command-log', 'aria-label': '命令日志' },
           React.createElement('strong', { className: 'gg-command-log-head' }, '命令日志'),
@@ -2377,9 +2386,10 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
+        GitWorkbenchPanel,
         GitChangesTab,
         GitCommitActions,
-        GitMergeTab, GitStashesTab, GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, requestAgentAnalysis, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
+        GitMergeTab, GitStashesTab, GitConflictsTab, parseConflictBlocks, chooseConflictBlock, conflictLineRanges, registerWorkbench, buildFileTree, parseReviewRows, renderRawDiffSurface, renderReviewSurface, injectStyles, filterLocalBranches,
         deriveCommitGraph, repositoryName, mutationCommand, appendCommandLog,
         refreshButtonLabel, recoveryProposalId, openRecoveryProposal, analysisProposalId, failureContext, buildAgentRepairPrompt,
         shouldShowAnalysisBanner, canDismissFailedProposal, pendingProposalTransition,

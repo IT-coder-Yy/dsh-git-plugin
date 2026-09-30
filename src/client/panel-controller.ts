@@ -1,5 +1,5 @@
 import type { AnyRecord } from './view-model'
-import { EmbeddedChat, openSideChat, SideChat } from './side-chat'
+import { EmbeddedChat, SideChat } from './side-chat'
 const React = require('react')
 
 export type Dispose = () => void
@@ -7,19 +7,11 @@ export type Dispose = () => void
 const WORKBENCH_ID = 'dsh-easygit-plugin'
 const WORKBENCH_KIND = 'easygit'
 
-/** Use the session-scoped conversation service; Connection no longer owns domain APIs. */
-export async function requestAgentAnalysis(sessions: AnyRecord, sessionId: string, text: string): Promise<void> {
-  const conversation = sessions.scope(sessionId)?.get('conversation')
-  if (!conversation) throw new Error('当前会话不可用，无法请求 Agent 分析')
-  await conversation.send(text)
-}
-
 /** Register a native tab without taking over the host's layout or other tabs. */
 export function registerWorkbench(ctx: AnyRecord, renderPanel: (props: {
   sessionId: string
   close: Dispose
-  sendPrompt(text: string): Promise<void>
-  renderChat(): unknown
+  renderChat(expanded: boolean): unknown
 }) => unknown): (sessionId: string) => void {
   const slots = ctx.get('slots')
   const tabs = ctx.get('sidebarRightTabs')
@@ -39,14 +31,8 @@ export function registerWorkbench(ctx: AnyRecord, renderPanel: (props: {
       return renderPanel({
         sessionId: props.sessionId,
         close: () => tab.actions.close(),
-        sendPrompt: async (text) => {
-          const id = await openSideChat(props.sessionId)
-          await sessions.using(id, { source: 'easygit' }, async (reference: AnyRecord) => {
-            await reference.ready
-            await requestAgentAnalysis(sessions, id, text)
-          })
-        },
-        renderChat: () => React.createElement(SideChat, {
+        renderChat: (expanded) => React.createElement(SideChat, {
+          collapsed: !expanded,
           key: props.sessionId, sessionId: props.sessionId, sessions,
           SessionProvider: props.SessionProvider, renderSlot: props.renderSlot,
         }),

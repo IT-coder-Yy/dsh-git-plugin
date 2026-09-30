@@ -67,26 +67,14 @@ test('Client 注册原生右栏标签、工具栏入口并将分析隔离到侧�
   assert.strictEqual(panel.args[1].sessionId, 'session-b')
   panel.args[1].close()
   assert.strictEqual(closed, 1)
-  t.mock.method(global, 'fetch', async (url, options) => {
-    assert.strictEqual(url, '/easygit')
-    assert.deepStrictEqual(JSON.parse(options.body), { action: 'side-chat', sessionId: 'session-b' })
-    return { json: async () => ({ ok: true, sessionId: 'git-child-b' }) }
-  })
   assert.deepStrictEqual(body.definition.children, { 'easygit.chat': { kind: 'single', scope: 'session' } })
   assert.ok(registrations.some(({ definition }) => definition.name === 'easygit.chat'))
-  assert.strictEqual(panel.args[1].renderChat().args[1].sessionId, 'session-b')
-  await panel.args[1].sendPrompt('分析 Git 失败')
-  assert.deepStrictEqual(sent, [['git-child-b', '分析 Git 失败']])
+  assert.strictEqual(panel.args[1].renderChat(false).args[1].collapsed, true)
+  assert.strictEqual(panel.args[1].renderChat(true).args[1].collapsed, false)
   tab.visible = false
   assert.strictEqual(body.renderer({ sessionId: 'session-b', useTabInfo: () => ({ tab }) }), null)
   for (const release of releases) if (typeof release === 'function') release()
   assert.strictEqual(released, true)
-})
-
-test('Agent 分析通过指定会话发送并传播会话缺失及业务错误', async () => {
-  const { requestAgentAnalysis } = loadClientPlugin().__testing
-  await assert.rejects(requestAgentAnalysis({ scope: () => undefined }, 'missing', '分析'), /当前会话不可用/)
-  await assert.rejects(requestAgentAnalysis({ scope: () => ({ get: () => ({ send: async () => { throw new Error('admission denied') } }) }) }, 'session-a', '分析'), /admission denied/)
 })
 
 test('变更文件按目录树归类，并保留根目录文件', () => {
@@ -996,4 +984,43 @@ test('压缩合并可完成或中止，存在冲突时阻止完成，中止必�
   assert.equal(request.confirmRisk, true)
   assert.equal(ui.nodes().find(node => node.args[1]?.role === 'status').args[1].className, 'gg-idletext')
   ui.cleanup()
+})
+
+test('建议页聊天默认折叠，错误自动分析一次，展示追问，取消后不重启并允许重试', async t => {
+  const slots = [], effects = [], requests = []
+  let cursor = 0, tree, poll
+  const component = loadClientPlugin({
+    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value }] },
+    useRef(initial) { const i = cursor++; return slots[i] ?? (slots[i] = { current: initial }) },
+    useEffect(effect, deps = []) { const i = cursor++, before = slots[i]; if (!before || deps.some((x, n) => !Object.is(x, before.deps[n]))) effects.push(() => { before?.cleanup?.(); slots[i] = { deps, cleanup: effect() } }) },
+  }).__testing.GitWorkbenchPanel
+  const proposal = { proposalId: 'failure-ui', status: 'failed', needsAgentAnalysis: true, failure: { command: 'git switch missing', message: 'invalid reference' } }
+  let running = false, reply = ''
+  t.mock.method(global, 'fetch', async (_, options) => {
+    const request = JSON.parse(options.body); requests.push(request)
+    if (request.action === 'request-analysis') { proposal.analysisRequestedAt = Date.now(); delete proposal.analysisCancelledAt; running = true }
+    if (request.action === 'cancel-analysis') { proposal.analysisCancelledAt = Date.now(); running = false; reply = '' }
+    return { json: async () => request.action === 'state' ? { ok: true, proposal, chat: { running, reply } } : { ok: true } }
+  })
+  const props = { sessionId: 'main-ui', close() {}, renderChat: expanded => ({ args: ['chat', { hidden: !expanded }] }), intervalFn: fn => { poll = fn; return () => {} } }
+  const render = async () => { cursor = 0; tree = component(props); while (effects.length) effects.shift()(); await new Promise(resolve => setImmediate(resolve)) }
+  const nodes = value => !value ? [] : Array.isArray(value) ? value.flatMap(nodes) : value.args ? [value, ...value.args.slice(2).flatMap(nodes)] : []
+  const button = name => nodes(tree).find(node => node.args[0] === 'button' && node.args[2] === name)
+  try {
+    await render(); await render(); await render()
+    assert.equal(requests.filter(r => r.action === 'request-analysis').length, 1)
+    assert.equal(nodes(tree).find(n => n.args[0] === 'chat').args[1].hidden, true)
+    assert.ok(button('取消分析'))
+    poll(); await render(); await render()
+    assert.equal(requests.filter(r => r.action === 'request-analysis').length, 1)
+    button('取消分析').args[1].onClick(); await render(); poll(); await render(); await render()
+    assert.ok(button('重新分析')); assert.equal(requests.filter(r => r.action === 'request-analysis').length, 1)
+    button('重新分析').args[1].onClick(); await render(); await render()
+    assert.equal(requests.filter(r => r.action === 'request-analysis').length, 2)
+    running = false; reply = '想新建分支还是切换远程分支？'; poll(); await render(); await render()
+    assert.ok(nodes(tree).some(n => n.args[2] === reply))
+    button('展开聊天 / 补充信息').args[1].onClick(); await render()
+    assert.equal(nodes(tree).find(n => n.args[0] === 'chat').args[1].hidden, false)
+    assert.ok(nodes(tree).some(n => n.args[1]?.['aria-label'] === '命令日志'))
+  } finally { for (const slot of slots) slot?.cleanup?.() }
 })

@@ -3,9 +3,16 @@ import { GitStashesTab } from './stash-tab';
 import { GitMergeTab } from './merge-tab';
 import { GitCommitActions } from './commit-actions';
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model';
-import { registerWorkbench, requestAgentAnalysis, type Dispose } from './panel-controller';
+import { registerWorkbench, type Dispose } from './panel-controller';
 import { appendCommandLog, analysisProposalId, beginTrackedRequest, buildAgentRepairPrompt, canDismissFailedProposal, buildFileTree, cancelTrackedRequest, commitFileTone, deriveCommitGraph, filterLocalBranches, failureContext, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, openRecoveryProposal, parseReviewRows, pendingProposalTransition, recoveryProposalId, repositoryName, shouldShowAnalysisBanner, type AnyRecord } from './view-model';
 type TimerFn = (callback: () => void, delayMs: number) => Dispose | void;
+interface GitWorkbenchPanelProps {
+    sessionId: string;
+    close: Dispose;
+    renderChat(expanded: boolean): unknown;
+    intervalFn?: TimerFn | null;
+    timeoutFn?: TimerFn | null;
+}
 interface RepositoryTabProps {
     onConflicts(): void;
     sessionId: string;
@@ -23,10 +30,12 @@ declare function refreshButtonLabel(state: RefreshState): string;
 declare function renderRawDiffSurface(diff: string): any;
 declare function renderReviewSurface(diff: string): any;
 declare function GitChangesTab(props: RepositoryTabProps): any;
+declare function GitWorkbenchPanel(props: GitWorkbenchPanelProps): any;
 declare const plugin: {
     inject: string[];
     apply(ctx: AnyRecord): void;
     __testing: {
+        GitWorkbenchPanel: typeof GitWorkbenchPanel;
         GitChangesTab: typeof GitChangesTab;
         GitCommitActions: typeof GitCommitActions;
         GitMergeTab: typeof GitMergeTab;
@@ -36,7 +45,6 @@ declare const plugin: {
         chooseConflictBlock: typeof chooseConflictBlock;
         conflictLineRanges: typeof conflictLineRanges;
         registerWorkbench: typeof registerWorkbench;
-        requestAgentAnalysis: typeof requestAgentAnalysis;
         buildFileTree: typeof buildFileTree;
         parseReviewRows: typeof parseReviewRows;
         renderRawDiffSurface: typeof renderRawDiffSurface;

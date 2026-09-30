@@ -21,7 +21,7 @@ export function EmbeddedChat(props: AnyRecord): unknown {
   })
 }
 
-export function SideChat({ sessionId, sessions, SessionProvider, renderSlot }: AnyRecord): unknown {
+export function SideChat({ sessionId, sessions, SessionProvider, renderSlot, collapsed }: AnyRecord): unknown {
   const [reference, setReference] = React.useState(null)
   const [error, setError] = React.useState('')
   const [retry, setRetry] = React.useState(0)
@@ -47,7 +47,7 @@ export function SideChat({ sessionId, sessions, SessionProvider, renderSlot }: A
     }, 5000)
     return () => { active = false; clearInterval(timer) }
   }, [sessionId, reference])
-  return React.createElement('section', { className: 'gg-side-chat', 'aria-label': 'Git 侧边聊天' },
+  return React.createElement('section', { className: 'gg-side-chat', hidden: collapsed, 'aria-label': 'Git 侧边聊天' },
     React.createElement('div', { className: 'gg-chat-head' }, 'Git 助手 · 主会话上下文自动同步'),
     error ? React.createElement('div', { role: 'alert', className: 'gg-workbench-error' }, error,
       React.createElement('button', { className: 'gg-btn', onClick: () => setRetry(retry + 1) }, '重试')) : null,
