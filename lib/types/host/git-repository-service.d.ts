@@ -38,7 +38,11 @@ export declare class GitRepositoryService {
         topLevel: string;
     }>>;
     getSummary(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<RepositorySummary>>;
-    getDiff(workdir: string, path: unknown, staged: boolean, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<DiffResult>>;
+    getDiff(workdir: string, path: unknown, staged: boolean, signal?: AbortSignal, sandboxPolicy?: unknown, comparison?: {
+        base: unknown;
+        target: unknown;
+        mergeBase?: boolean;
+    }): Promise<ActionResult<DiffResult>>;
     getBranches(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<RepositoryReferences>>;
     getCommits(workdir: string, limit: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<CommitSummary[]>>;
     getCommitDetail(workdir: string, hash: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<CommitDetail>>;

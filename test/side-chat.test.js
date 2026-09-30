@@ -8,7 +8,7 @@ const { createRepo, cleanup, makeShell } = require('./helpers')
 function fixture(saved = {}) {
   const listeners = {}, agents = new Map(), modelChanges = [], guards = []
   let counter = 0
-  const tools = { schemas: scope => { assert.equal(typeof scope, 'object'); return ['read', 'shell', 'write', 'git_propose', 'git_repo_state'].map(name => ({ name })) }, restrict: () => {}, guard: fn => guards.push(fn) }
+  const tools = { schemas: scope => { assert.equal(typeof scope, 'object'); return ['read', 'shell', 'write', 'git_propose', 'git_repo_state', 'git_diff'].map(name => ({ name })) }, restrict: () => {}, guard: fn => guards.push(fn) }
   function agent(id, events = []) {
     const value = {
       id, ctx: { get: key => ({ tools, systemPrompt: { context: () => {} } })[key] },
@@ -162,6 +162,12 @@ test('侧边提议归属主会话；过期拒绝、成功与重复执行反馈�
     const state = await registered.get('git_repo_state').execute({}, { agent: child })
     assert.equal(state.isRepo, true)
     assert.equal(state.topLevel, dir)
+    fs.writeFileSync(dir + '/a.txt', 'read-only diff\n')
+    const diffTool = registered.get('git_diff')
+    assert.equal(f.guards.at(-1)({ name: 'git_diff', agent: child }), undefined)
+    assert.match((await diffTool.execute({}, { agent: child })).diff, /\+read-only diff/)
+    assert.equal((await diffTool.execute({}, { agent: { id: 'missing' } })).ok, false)
+    assert.ok(requests.filter(request => request.command.includes('diff')).every(request => request.workdir === dir))
     const propose = command => registered.get('git_propose').execute({ command, intent: 'test' }, { agent: child })
     const old = await propose('git branch stale'); assert.equal(old.ok, true)
     assert.equal(helpers.findProposal('main', old.proposalId).chatSessionId, child.id)

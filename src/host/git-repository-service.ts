@@ -284,19 +284,32 @@ export class GitRepositoryService {
     }
   }
 
-  async getDiff(workdir: string, path: unknown, staged: boolean, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<DiffResult>> {
+  async getDiff(workdir: string, path: unknown, staged: boolean, signal?: AbortSignal, sandboxPolicy?: unknown, comparison?: { base: unknown; target: unknown; mergeBase?: boolean }): Promise<ActionResult<DiffResult>> {
     if (path !== undefined && path !== null && !validPathspec(path)) return errorResult('INVALID_ARGUMENT', 'path 必须是仓库内的相对路径')
     const topLevel = await this.getTopLevel(workdir, signal, sandboxPolicy)
     if (!topLevel.ok) return topLevel
-    const pathArgument = typeof path === 'string' ? ' -- ' + quoteShellArg(path) : ''
-    const command = 'git diff' + (staged ? ' --cached' : '') + pathArgument
+    let range = ''
+    if (comparison) {
+      if (staged) return errorResult('INVALID_ARGUMENT', '分支比较不能同时指定 staged')
+      const hashes: string[] = []
+      for (const ref of [comparison.base, comparison.target]) {
+        if (typeof ref !== 'string' || !ref || ref.length > 1024 || /[\x00\r\n]/.test(ref)) return errorResult('INVALID_ARGUMENT', 'base 和 target 必须是有效提交引用')
+        const resolved = await this.run(workdir, 'git rev-parse --verify --end-of-options ' + quoteShellArg(ref + '^{commit}'), 15_000, 4096, signal, sandboxPolicy)
+        const hash = resolved.stdout?.text?.trim()
+        if (resolved.exitCode !== 0 || !validCommitHash(hash)) return errorResult('INVALID_ARGUMENT', '无法解析提交引用', redactAndLimit(outputOf(resolved), 4096))
+        hashes.push(hash)
+      }
+      range = ' ' + hashes.join(comparison.mergeBase ? '...' : ' ')
+    }
+    const pathArgument = ' --' + (typeof path === 'string' ? ' ' + quoteShellArg(path) : '')
+    const command = 'git --literal-pathspecs diff --no-color --no-ext-diff --no-textconv' + (staged ? ' --cached' : '') + range + pathArgument
     const result = await this.run(workdir, command, 20_000, DIFF_MAX_CHARS + 1024, signal, sandboxPolicy)
     if (result.exitCode !== 0) return errorResult('GIT_FAILED', '无法读取 Git Diff', redactAndLimit(outputOf(result), 8192))
     let raw = redactSecrets(result.stdout?.text ?? '')
-    if (!staged && typeof path === 'string' && raw.length === 0) {
+    if (!comparison && !staged && typeof path === 'string' && raw.length === 0) {
       const tracked = await this.run(workdir, 'git ls-files --error-unmatch -- ' + quoteShellArg(path), 15_000, 4096, signal, sandboxPolicy)
       if (tracked.exitCode !== 0) {
-        const untracked = await this.run(workdir, 'git diff --no-index -- /dev/null ' + quoteShellArg(path), 20_000, DIFF_MAX_CHARS + 1024, signal, sandboxPolicy)
+        const untracked = await this.run(workdir, 'git diff --no-color --no-ext-diff --no-textconv --no-index -- /dev/null ' + quoteShellArg(path), 20_000, DIFF_MAX_CHARS + 1024, signal, sandboxPolicy)
         if (untracked.exitCode !== 0 && untracked.exitCode !== 1) {
           return errorResult('GIT_FAILED', '无法读取未跟踪文件的 Diff', redactAndLimit(outputOf(untracked), 8192))
         }

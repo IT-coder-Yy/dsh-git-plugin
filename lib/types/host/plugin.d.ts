@@ -5,7 +5,7 @@
  * Harness session. It uses only ctx.tools.register for tools and a
  * ctx.webServer POST /easygit route for Client-to-Host actions.
  *
- * The exposed model tools are git_propose and git_repo_state. Repository changes
+ * The exposed model tools are git_propose, git_repo_state and git_diff. Repository changes
  * are only available through the Client action route.
  */
 import { SideChatService } from './side-chat';
