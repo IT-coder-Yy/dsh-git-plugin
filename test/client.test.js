@@ -69,6 +69,11 @@ test('Client 注册原生右栏标签、工具栏入口并将分析隔离到侧�
   assert.strictEqual(closed, 1)
   assert.deepStrictEqual(body.definition.children, { 'easygit.chat': { kind: 'single', scope: 'session' } })
   assert.ok(registrations.some(({ definition }) => definition.name === 'easygit.chat'))
+  const chat = registrations.find(({ definition }) => definition.name === 'easygit.chat').renderer
+  const renderChat = openState => chat({ useSession: select => select({ openState }), renderFactorySlot: (...args) => args })
+  const before = renderChat('loading'), after = renderChat('ready')
+  assert.strictEqual(before[2].slots.views, after[2].slots.views, '刷新时必须保留原生聊天组件身份，防止通知、思考及工具详情自动收起')
+  assert.deepStrictEqual(after[2].slots.views({ renderSlot: (...args) => args }), ['conversation.session', { view: 'chat' }])
   assert.strictEqual(panel.args[1].renderChat(false).args[1].collapsed, true)
   assert.strictEqual(panel.args[1].renderChat(true).args[1].collapsed, false)
   tab.visible = false

@@ -13,11 +13,12 @@ export async function openSideChat(sessionId: string): Promise<string> {
 }
 
 /** Same native Conversation factory used by DSH's sidebar subagent chat. */
+const chatViews = (view: AnyRecord) => view.renderSlot('conversation.session', { view: 'chat' })
 export function EmbeddedChat(props: AnyRecord): unknown {
   const session = props.useSession((value: AnyRecord) => value)
   const phase = session.openState === 'loading' ? 'settling' : 'active'
   return props.renderFactorySlot('conversation.content', { variant: 'embedded', phase, hero: false }, {
-    slots: { views: (view: AnyRecord) => view.renderSlot('conversation.session', { view: 'chat' }) },
+    slots: { views: chatViews },
   })
 }
 
