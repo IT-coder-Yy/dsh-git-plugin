@@ -627,6 +627,54 @@ function stashHarness(rpc, componentName = 'GitStashesTab') {
   }
 }
 
+test('AI 生成与提交并排；生成中禁用、成功回填、失败保留原文并丢弃迟到响应', async (t) => {
+  let files = [], resolveGeneration, calls = 0
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    const request = JSON.parse(options.body)
+    if (request.action === 'generate-commit-message') {
+      calls++
+      return new Promise(resolve => { resolveGeneration = body => resolve({ json: async () => body }) })
+    }
+    return { json: async () => ({ ok: true, data: { files, branch: 'main', topLevel: '/test' } }) }
+  })
+  const ui = stashHarness(() => {}, 'GitChangesTab')
+  const input = () => ui.nodes().find(node => node.args[1]?.id === 'gg-commit-message').args[1]
+  try {
+    await ui.render(); await ui.render()
+    assert.equal(ui.button('AI 生成').args[1].disabled, true)
+    files = [{ path: 'a.txt', indexStatus: 'M', workTreeStatus: ' ' }]
+    ui.props.revision++
+    await ui.render(); await ui.render()
+    const row = ui.nodes().find(node => node.args[1]?.className === 'gg-commit-buttons')
+    assert.deepEqual(row.args.slice(2).map(button => button.args[2]), ['AI 生成', '提交'])
+    input().onChange({ target: { value: 'fix: 原文' } })
+    await ui.render()
+    const click = ui.button('AI 生成').args[1].onClick
+    const first = click(); click()
+    await ui.render()
+    assert.equal(calls, 1)
+    assert.equal(ui.button('生成中…').args[1].disabled, true)
+    assert.equal(ui.button('提交').args[1].disabled, true)
+    assert.equal(input().disabled, true)
+    resolveGeneration({ ok: true, data: { message: 'feat: 新功能' } }); await first
+    await ui.render()
+    assert.equal(input().value, 'feat: 新功能')
+    assert.equal(ui.button('提交').args[1].disabled, false)
+    const failed = ui.button('AI 生成').args[1].onClick()
+    resolveGeneration({ ok: false, code: 'INTERNAL_ERROR', message: '模型不可用' }); await failed
+    await ui.render()
+    assert.equal(input().value, 'feat: 新功能')
+    assert.ok(ui.nodes().some(node => node.args[1]?.role === 'alert' && node.args[2].includes('模型不可用')))
+    const late = ui.button('AI 生成').args[1].onClick()
+    ui.props.sessionId = 'new-session'
+    await ui.render(); await ui.render()
+    resolveGeneration({ ok: true, data: { message: 'fix: 过期结果' } }); await late
+    await ui.render()
+    assert.notEqual(input().value, 'fix: 过期结果')
+    assert.equal(ui.button('AI 生成').args[1].disabled, false)
+  } finally { ui.cleanup() }
+})
+
 test('变更文件暂存、取消暂存后跟随 Diff 分组，提交后清空旧 Diff 并丢弃迟到响应', async () => {
   let files = [{ path: 'a.txt', indexStatus: ' ', workTreeStatus: 'M' }]
   const requests = []

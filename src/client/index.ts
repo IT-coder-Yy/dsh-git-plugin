@@ -234,6 +234,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-change-layout { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
         .gg-change-files { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
         .gg-file-group, .gg-branch-list, .gg-commit-list, .gg-stash-list, .gg-commit-form, .gg-branch-form { display: flex; flex-direction: column; gap: 5px; border: 1px solid rgba(215,220,222,.72); border-radius: 3px; padding: 6px; }
+        .gg-commit-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
         .gg-file-group > strong { color: #51efba; font-size: 12px; }
         .gg-file-tree { display: flex; flex-direction: column; min-width: 0; }
         .gg-tree-folder { display: flex; flex-direction: column; min-width: 0; }
@@ -843,7 +844,10 @@ interface SyncTabProps extends RepositoryTabProps {}
       const [summary, setSummary] = React.useState(null as RepositorySummary | null)
       const [selected, setSelected] = React.useState(null as { path: string; staged: boolean } | null)
       const [diff, setDiff] = React.useState('')
-      const [busy, setBusy] = React.useState(false)
+      const [mutating, setBusy] = React.useState(false)
+      const [generating, setGenerating] = React.useState(false)
+      const [generationError, setGenerationError] = React.useState('')
+      const busy = mutating || generating
       const [message, setMessage] = React.useState('')
       const [diagnostics, setDiagnostics] = React.useState('')
       const [commitMessage, setCommitMessage] = React.useState('')
@@ -854,6 +858,33 @@ interface SyncTabProps extends RepositoryTabProps {}
       const manualRefreshRef = React.useRef(false)
       const summaryRequestRef = React.useRef({ controller: null, sequence: 0 } as RequestSlot)
       const diffRequestRef = React.useRef({ controller: null, sequence: 0 } as RequestSlot)
+      const generationRequestRef = React.useRef({ controller: null, sequence: 0 } as RequestSlot)
+
+      const generateMessage = async () => {
+        if (busy || generationRequestRef.current.controller) return
+        const request = beginTrackedRequest(generationRequestRef)
+        setGenerating(true)
+        setGenerationError('')
+        try {
+          const response = await rpc({ action: 'generate-commit-message', sessionId }, request.signal)
+          if (!isTrackedRequestCurrent(generationRequestRef, request)) return
+          if (response.ok) setCommitMessage(response.data.message)
+          else setGenerationError(actionError(response))
+        } catch (error) {
+          if (isTrackedRequestCurrent(generationRequestRef, request) && !isAbortError(error)) setGenerationError(errorText(error))
+        } finally {
+          if (isTrackedRequestCurrent(generationRequestRef, request)) {
+            cancelTrackedRequest(generationRequestRef)
+            setGenerating(false)
+          }
+        }
+      }
+
+      React.useEffect(() => {
+        setGenerating(false)
+        setGenerationError('')
+        return () => cancelTrackedRequest(generationRequestRef)
+      }, [sessionId])
 
       const loadDiff = (selection: { path: string; staged: boolean }, showLoading = true): Promise<boolean> => {
         if (showLoading) setDiff('正在加载差异…')
@@ -1067,10 +1098,17 @@ interface SyncTabProps extends RepositoryTabProps {}
                   onChange: (event: AnyRecord) => setCommitMessage(String(event.target.value || '')),
                 }),
               ),
-              React.createElement('button', {
-                className: 'gg-btn primary', disabled: busy || hasConflicts || !commitMessage.trim() || stagedFiles.length === 0,
-                onClick: () => runMutation('commit', { message: commitMessage }).then((succeeded: boolean) => { if (succeeded) setCommitMessage('') }),
-              }, '提交'),
+              React.createElement('div', { className: 'gg-commit-buttons' },
+                React.createElement('button', {
+                  className: 'gg-btn', type: 'button', disabled: busy || hasConflicts || stagedFiles.length === 0,
+                  onClick: generateMessage,
+                }, generating ? '生成中…' : 'AI 生成'),
+                React.createElement('button', {
+                  className: 'gg-btn primary', disabled: busy || hasConflicts || !commitMessage.trim() || stagedFiles.length === 0,
+                  onClick: () => runMutation('commit', { message: commitMessage }).then((succeeded: boolean) => { if (succeeded) setCommitMessage('') }),
+                }, '提交'),
+              ),
+              generationError ? React.createElement('div', { className: 'gg-workbench-error', role: 'alert' }, generationError) : null,
             ),
             React.createElement(GitCommitActions, { key: sessionId, sessionId, revision, rpc, disabled: busy, onBusy: setBusy, onChanged, onCommand, onConflicts: props.onConflicts }),
           ),
