@@ -10,6 +10,7 @@
  */
 
 import { registerEasyGitActions, type WebServerService, type ConnectionService } from './actions'
+import { SideChatService } from './side-chat'
 import type { GitFailureContext } from '../shared/contracts'
 import {
   ProposalService,
@@ -895,6 +896,7 @@ const plugin = {
 
 // Pure helpers exported for tests and downstream integrations.
 const helpers = {
+  SideChatService,
   parseCommand,
   validateCommand,
   modernizeCommand,

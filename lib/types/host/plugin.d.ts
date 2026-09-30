@@ -8,6 +8,7 @@
  * The exposed model tools are git_propose and git_repo_state. Repository changes
  * are only available through the Client action route.
  */
+import { SideChatService } from './side-chat';
 import type { GitFailureContext } from '../shared/contracts';
 import { ProposalService, type ProposalView, type StoredProposal } from './proposal-service';
 import { GitRepositoryService, type ShellService } from './git-repository-service';
@@ -98,6 +99,7 @@ declare const _default: {
     apply(ctx: HostContext): void;
 } & {
     helpers: {
+        SideChatService: typeof SideChatService;
         parseCommand: typeof parseCommand;
         validateCommand: typeof validateCommand;
         modernizeCommand: typeof modernizeCommand;
