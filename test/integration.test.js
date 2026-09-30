@@ -703,8 +703,10 @@ test('结构化仓库 Action 受会话工作目录约束，并对 operationId �
     const analysisRequest = await callHttp(route.handler, {
       action: 'request-analysis', sessionId: 'workbench-session', proposalId: failedContext.proposalId,
     })
-    assert.strictEqual(analysisRequest.body.ok, true)
-    assert.ok(latestPending('workbench-session').analysisRequestedAt)
+    assert.strictEqual(analysisRequest.body.ok, false, '没有原生会话接口时应明确报错，不能假装已经启动分析')
+    assert.match(analysisRequest.body.error, /DSH 0.2/)
+    // 后续验证已发起分析的失败关联；原生分析启动由 side-chat 测试覆盖。
+    failedContext.analysisRequestedAt = Date.now()
 
     const propose = registered.find((definition) => definition.name === 'git_propose')
     const repaired = await propose.execute({

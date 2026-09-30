@@ -28,6 +28,13 @@ interface RepositoryContext {
 interface EasyGitActionDependencies {
     repository: GitRepositoryService;
     proposalStorageReady: Promise<void>;
+    requestAnalysis?(proposal: StoredProposal, persist: () => Promise<void>, retry: boolean): Promise<void>;
+    cancelAnalysis?(sessionId: string): Promise<void>;
+    chatStatus?(sessionId: string, since?: number): Promise<{
+        running: boolean;
+        reply: string;
+        error?: string;
+    }>;
     openChat?(sessionId: string): Promise<unknown>;
     generateCommitMessage?(sessionId: string, context: RepositoryContext): Promise<unknown>;
     shell: ShellService | null;

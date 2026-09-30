@@ -184,6 +184,7 @@ export class ProposalService {
       ...(proposal.failure ? { failure: proposal.failure } : {}),
       ...(typeof proposal.recoverySuggestion === 'string' ? { recoverySuggestion: proposal.recoverySuggestion } : {}),
       ...(proposal.needsAgentAnalysis === true ? { needsAgentAnalysis: true } : {}),
+      ...(typeof proposal.analysisCancelledAt === 'number' ? { analysisCancelledAt: proposal.analysisCancelledAt } : {}),
       ...(typeof proposal.analysisRequestedAt === 'number' ? { analysisRequestedAt: proposal.analysisRequestedAt } : {}),
       status: proposal.status || (proposal.closed ? 'dismissed' : 'pending'),
     }

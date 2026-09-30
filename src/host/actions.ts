@@ -34,6 +34,9 @@ interface RepositoryContext {
 interface EasyGitActionDependencies {
   repository: GitRepositoryService
   proposalStorageReady: Promise<void>
+  requestAnalysis?(proposal: StoredProposal, persist: () => Promise<void>, retry: boolean): Promise<void>
+  cancelAnalysis?(sessionId: string): Promise<void>
+  chatStatus?(sessionId: string, since?: number): Promise<{ running: boolean; reply: string; error?: string }>
   openChat?(sessionId: string): Promise<unknown>
   generateCommitMessage?(sessionId: string, context: RepositoryContext): Promise<unknown>
   shell: ShellService | null
@@ -279,13 +282,25 @@ async function dispatchProposalAction(
     if (!proposal || proposal.closed || proposal.status !== 'failed' || proposal.needsAgentAnalysis !== true || !proposal.failure) {
       return { status: 200, data: { ok: false, error: '该失败记录已不再等待 Agent 分析' } }
     }
-    proposal.analysisRequestedAt = Date.now()
-    await dependencies.flushProposal(sessionId)
+    if (!dependencies.requestAnalysis) throw new Error('侧边分析服务不可用')
+    if (body.retry === true) delete proposal.analysisCancelledAt
+    await dependencies.requestAnalysis(proposal, () => dependencies.flushProposal(sessionId), body.retry === true)
+    return { status: 200, data: { ok: true } }
+  }
+
+  if (action === 'cancel-analysis') {
+    const proposal = dependencies.findProposal(sessionId, body.proposalId)
+    if (proposal) {
+      proposal.analysisCancelledAt = Date.now()
+      await dependencies.flushProposal(sessionId)
+    }
+    await dependencies.cancelAnalysis?.(sessionId)
     return { status: 200, data: { ok: true } }
   }
 
   if (action === 'state') {
     const proposal = dependencies.latestPending(sessionId)
+    const chat = await dependencies.chatStatus?.(sessionId, Number(proposal?.analysisRequestedAt) || 0)
     if (proposal && proposal.status === 'pending' && proposal.copied === true && proposal.fingerprint) {
       const verification = await dependencies.verifyProposal(dependencies.shell, proposal, await dependencies.resolveExecutionPolicy(sessionId))
       if (verification.verified) {
@@ -293,9 +308,9 @@ async function dispatchProposalAction(
         proposal.status = 'verified'
         await dependencies.flushProposal(sessionId)
       }
-      return { status: 200, data: { ok: true, proposal: dependencies.proposalView(proposal), ...verification } }
+      return { status: 200, data: { ok: true, chat, proposal: dependencies.proposalView(proposal), ...verification } }
     }
-    return { status: 200, data: { ok: true, proposal: proposal ? dependencies.proposalView(proposal) : null, changed: false, verified: false, partial: false, message: '', changedState: '' } }
+    return { status: 200, data: { ok: true, chat, proposal: proposal ? dependencies.proposalView(proposal) : null, changed: false, verified: false, partial: false, message: '', changedState: '' } }
   }
 
   if (action === 'dismiss') {
