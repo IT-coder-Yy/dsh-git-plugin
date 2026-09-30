@@ -29,7 +29,7 @@ English · [简体中文](README.zh-CN.md)
 
 | Area | What you can do |
 | --- | --- |
-| Changes | Review formatted or raw diffs; stage or unstage individual files or all files; create commits. |
+| Changes | Review formatted or raw diffs; stage or unstage files; use **AI 生成** to draft a Conventional Commit with the current session model using staged changes and project context, then edit and commit. |
 | Commit history | Browse the graph, inspect messages, parents, changed files and diffs; amend, undo, or revert commits. |
 | Branches | Search, create, switch, and delete local branches; inspect remote branches and tags. |
 | Merge branches | Preview incoming commits and changes; choose normal, fast-forward-only, or squash merge. |
@@ -37,15 +37,15 @@ English · [简体中文](README.zh-CN.md)
 | Stashes | Stash all or selected files, optionally including untracked files; review, apply, pop, drop, or create a branch from a stash. |
 | Sync | Inspect upstream and ahead/behind counts; fetch, fast-forward pull, push, set upstream, and manage Rebase. |
 
-For more involved workflows, you can also ask the Agent in natural language. Review its proposed Git commands in **建议 (Proposals)**, then execute or copy them. Failed actions retain command output and repository diagnostics for recovery or Agent analysis.
+For more involved workflows, chat with the independent Git assistant in **建议**. It inherits and receives updates from the main conversation while keeping its model settings independent. Review generated commands before execution; results return to the assistant, and stale proposals are rejected when the repository changes. Failed operations retain command output and repository diagnostics for follow-up analysis.
 
 ## Quick start
 
-Requires Git, Node.js `^22.19.0 || >=24.0.0`, and DeepSeek Harness Web. Plugin `0.3.0` targets DSH `0.1.7-rc.1`; see [compatibility](#compatibility).
+Requires Git, Node.js `^22.19.0 || >=24.0.0`, and DeepSeek Harness Web. Plugin `0.4.0` is verified with DSH `0.2.0-rc.1`; see [compatibility](#compatibility).
 
 ```sh
-npm install -g @deepseek-ai/dsh@0.1.7-rc.1
-dsh plugin --profile web add dsh-easygit-plugin@0.3.0
+npm install -g @deepseek-ai/dsh@0.2.0-rc.1
+dsh plugin --profile web add dsh-easygit-plugin@0.4.0
 dsh web
 ```
 
@@ -112,9 +112,9 @@ You can also install directly from the repository with `dsh plugin --profile web
 
 ## Compatibility
 
-Version `0.3.0` integrates with DSH `0.1.7-rc.1` using native sidebar tabs and session APIs. Shell execution uses `execute(spec).result()` and retains the `run(spec)` fallback for DSH `0.1.6-alpha.2`. DSH `0.1.0-rc.8` is no longer supported.
+Version `0.4.0` is verified with DSH `0.2.0-rc.1`. The independent Git assistant requires the native session APIs in DSH 0.2. Shell execution uses `execute(spec).result()` and retains the legacy `run(spec)` fallback. Validation covers 160 automated tests and real DSH, browser, model, and temporary Git repository workflows; see the [full verification report](docs/full-verification-2026-09-29.zh-CN.md). Desktop and other operating systems have not been fully tested.
 
-Check other installed plugins when upgrading DSH. If you use `dsh-client-auto-continue`, upgrade it to `0.11.8` or later: `0.11.6` depends on the removed `settingsScope` service and can block Web startup on DSH `0.1.7-rc.1`.
+DSH `0.2.0-rc.1` skips plugins whose declared peer dependencies exclude the runtime version. Check other installed plugins when upgrading: `dshmarket@1.66.5` declares support for DSH `0.2.0-rc.1`, while `dsh-client-auto-continue@0.11.9` still declares only DSH `0.1.x` settings dependencies and is skipped. Wait for a compatible auto-continue release before using it on DSH `0.2`.
 
 ## Safety and Agent tools
 
