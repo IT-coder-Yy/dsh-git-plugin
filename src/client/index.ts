@@ -86,6 +86,7 @@ interface GitWorkbenchPanelProps {
 interface GitDockProps {
   sessionId?: unknown
   onFailure: FailureHandler
+  onCommand?: CommandReporter
   intervalFn?: TimerFn | null
   timeoutFn?: TimerFn | null
 }
@@ -1954,7 +1955,7 @@ interface SyncTabProps extends RepositoryTabProps {}
               ? React.createElement(GitStashesTab, { key: props.sessionId, sessionId: props.sessionId, revision, rpc, onChanged: refresh, onCommand: reportCommand, onConflicts: () => setTab('conflicts'), renderReview: renderReviewSurface, renderRawDiff: renderRawDiffSurface })
               : tab === 'sync'
                 ? React.createElement(GitSyncTab, { sessionId: props.sessionId, intervalFn: props.intervalFn, revision, onChanged: refresh, onCommand: reportCommand, onFailure: handleFailure, onConflicts: () => setTab('conflicts') })
-                : React.createElement(GitDock, { sessionId: props.sessionId, intervalFn: props.intervalFn, timeoutFn: props.timeoutFn, onFailure: handleFailure })
+                : React.createElement(GitDock, { sessionId: props.sessionId, intervalFn: props.intervalFn, timeoutFn: props.timeoutFn, onFailure: handleFailure, onCommand: reportCommand })
       const analysisBanner = shouldShowAnalysisBanner(tab, pendingAnalysis) && pendingAnalysis ? React.createElement('div', { className: 'gg-analysis' },
         React.createElement('strong', null, pendingAnalysis.status === 'waiting' ? 'Agent 正在分析 Git 失败…' : '这个 Git 失败需要 Agent 分析'),
         renderFailureDetails(pendingAnalysis.failure),
@@ -2131,8 +2132,10 @@ interface SyncTabProps extends RepositoryTabProps {}
         if (!canRun) return
         setBusy(true)
         setOutcome(null)
+        const finish = props.onCommand?.('执行建议', steps.map(step => step.command).join(' && '))
         rpc({ action: 'execute', sessionId: String(sessionId), proposalId: proposal.proposalId, confirm: understood })
           .then((res) => {
+            finish?.(res?.ok === true)
             setOutcome(res || { ok: false, error: '无返回' })
             if (res?.feedbackError) setVerifyMsg(res.feedbackError)
             if (res && res.ok === true) scheduleClose(proposal.proposalId)
@@ -2157,7 +2160,7 @@ interface SyncTabProps extends RepositoryTabProps {}
               }
             }
           })
-          .catch((err) => { setOutcome({ ok: false, error: errorText(err) }) })
+          .catch((err) => { finish?.(false); setOutcome({ ok: false, error: errorText(err) }) })
           .then(() => setBusy(false))
       }
       const onCopy = () => {
