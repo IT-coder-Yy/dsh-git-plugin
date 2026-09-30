@@ -272,11 +272,13 @@ export interface ProposalView {
   recoverySuggestion?: string
   needsAgentAnalysis?: boolean
   analysisRequestedAt?: number
+  analysisCancelledAt?: number
 }
 
 export type ProposalStateResponse =
   | {
       ok: true
+      chat?: { running: boolean; reply: string; error?: string }
       proposal: ProposalView | null
       changed: boolean
       verified: boolean
@@ -357,7 +359,8 @@ export interface EasyGitRequestMap {
   rebase: { sessionId: string; operationId: string; target: string; confirmRisk?: boolean }
   'rebase-continue': { sessionId: string; operationId: string; confirmRisk?: boolean }
   'rebase-abort': { sessionId: string; operationId: string; confirmRisk?: boolean }
-  'request-analysis': { sessionId: string; proposalId: string }
+  'request-analysis': { sessionId: string; proposalId: string; retry?: boolean }
+  'cancel-analysis': { sessionId: string; proposalId?: string }
   state: { sessionId: string }
   dismiss: { sessionId: string; proposalId: string; manual?: boolean }
   'mark-copied': { sessionId: string; proposalId: string; confirm?: boolean }
@@ -410,6 +413,7 @@ export interface EasyGitResponseMap {
   rebase: ActionResult<SyncState>
   'rebase-continue': ActionResult<SyncState>
   'rebase-abort': ActionResult<SyncState>
+  'cancel-analysis': ProposalCommandResponse
   'request-analysis': ProposalCommandResponse
   state: ProposalStateResponse
   dismiss: ProposalCommandResponse
