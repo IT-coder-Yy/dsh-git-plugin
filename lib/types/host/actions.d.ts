@@ -34,11 +34,11 @@ interface EasyGitActionDependencies {
     findProposal(sessionId: string, proposalId: unknown): StoredProposal | undefined;
     proposalView(proposal: StoredProposal): ProposalView;
     flushProposal(sessionId: string): Promise<void>;
-    captureFingerprint(shell: ShellService | null, workdir: string): Promise<string | null>;
-    runChecks(shell: ShellService | null, workdir: string, checks: ReturnType<typeof deriveChecks>): Promise<string[]>;
-    verifyProposal(shell: ShellService | null, proposal: StoredProposal): Promise<ProposalVerification>;
+    captureFingerprint(shell: ShellService | null, workdir: string, policy?: unknown): Promise<string | null>;
+    runChecks(shell: ShellService | null, workdir: string, checks: ReturnType<typeof deriveChecks>, policy?: unknown): Promise<string[]>;
+    verifyProposal(shell: ShellService | null, proposal: StoredProposal, policy?: unknown): Promise<ProposalVerification>;
     executeProposal(shell: ShellService | null, proposal: StoredProposal, policy: unknown, persist: () => Promise<void>): Promise<UnknownRecord>;
-    recoverFailedCommand(sessionId: string, workdir: string, operationId: string, action: string, command: string, message: string, errorOutput: string, errorCode: string, reason: string): Promise<UnknownRecord | null>;
+    recoverFailedCommand(sessionId: string, workdir: string, operationId: string, action: string, command: string, message: string, errorOutput: string, errorCode: string, reason: string, policy?: unknown): Promise<UnknownRecord | null>;
     resolveExecutionPolicy(sessionId: string): Promise<unknown>;
 }
 /** Register the Client-to-Host POST dispatcher with a 1 MiB body limit. */

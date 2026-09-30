@@ -40,9 +40,9 @@ interface EasyGitActionDependencies {
   findProposal(sessionId: string, proposalId: unknown): StoredProposal | undefined
   proposalView(proposal: StoredProposal): ProposalView
   flushProposal(sessionId: string): Promise<void>
-  captureFingerprint(shell: ShellService | null, workdir: string): Promise<string | null>
-  runChecks(shell: ShellService | null, workdir: string, checks: ReturnType<typeof deriveChecks>): Promise<string[]>
-  verifyProposal(shell: ShellService | null, proposal: StoredProposal): Promise<ProposalVerification>
+  captureFingerprint(shell: ShellService | null, workdir: string, policy?: unknown): Promise<string | null>
+  runChecks(shell: ShellService | null, workdir: string, checks: ReturnType<typeof deriveChecks>, policy?: unknown): Promise<string[]>
+  verifyProposal(shell: ShellService | null, proposal: StoredProposal, policy?: unknown): Promise<ProposalVerification>
   executeProposal(shell: ShellService | null, proposal: StoredProposal, policy: unknown, persist: () => Promise<void>): Promise<UnknownRecord>
   recoverFailedCommand(
     sessionId: string,
@@ -54,6 +54,7 @@ interface EasyGitActionDependencies {
     errorOutput: string,
     errorCode: string,
     reason: string,
+    policy?: unknown,
   ): Promise<UnknownRecord | null>
   resolveExecutionPolicy(sessionId: string): Promise<unknown>
 }
@@ -165,6 +166,7 @@ async function attachRepositoryRecovery(
       typeof failure.diagnostics === 'string' ? failure.diagnostics : '',
       typeof failure.code === 'string' ? failure.code : 'GIT_FAILED',
       typeof failure.reason === 'string' ? failure.reason : '',
+      context.policy,
     )
     return handled ? { ...failure, ...handled } : result
   } catch (error) {
@@ -278,7 +280,7 @@ async function dispatchProposalAction(
   if (action === 'state') {
     const proposal = dependencies.latestPending(sessionId)
     if (proposal && proposal.status === 'pending' && proposal.copied === true && proposal.fingerprint) {
-      const verification = await dependencies.verifyProposal(dependencies.shell, proposal)
+      const verification = await dependencies.verifyProposal(dependencies.shell, proposal, await dependencies.resolveExecutionPolicy(sessionId))
       if (verification.verified) {
         proposal.verified = true
         proposal.status = 'verified'
@@ -305,8 +307,9 @@ async function dispatchProposalAction(
     if (!proposal) return { status: 200, data: { ok: false, error: '找不到该提议' } }
     if (proposal.status !== 'pending') return { status: 200, data: { ok: false, error: '该提议已不再等待执行' } }
     if (proposal.risk === 'hard' && body.confirm !== true) return { status: 200, data: { ok: false, error: '高风险操作：请先勾选“我已了解风险”再复制' } }
-    proposal.fingerprint = await dependencies.captureFingerprint(dependencies.shell, proposal.workdir)
-    proposal.baselineFailed = await dependencies.runChecks(dependencies.shell, proposal.workdir, deriveChecks(proposal.steps.map((step) => step.command)))
+    const policy = await dependencies.resolveExecutionPolicy(sessionId)
+    proposal.fingerprint = await dependencies.captureFingerprint(dependencies.shell, proposal.workdir, policy)
+    proposal.baselineFailed = await dependencies.runChecks(dependencies.shell, proposal.workdir, deriveChecks(proposal.steps.map((step) => step.command)), policy)
     proposal.copied = true
     await dependencies.flushProposal(sessionId)
     return { status: 200, data: { ok: true } }
@@ -319,7 +322,7 @@ async function dispatchProposalAction(
     if (proposal.copied !== true || !proposal.fingerprint) {
       return { status: 200, data: { ok: true, changed: false, verified: false, partial: false, message: '尚未复制命令或缺少对比基线', changedState: '' } }
     }
-    const verification = await dependencies.verifyProposal(dependencies.shell, proposal)
+    const verification = await dependencies.verifyProposal(dependencies.shell, proposal, await dependencies.resolveExecutionPolicy(sessionId))
     if (verification.verified) {
       proposal.verified = true
       proposal.status = 'verified'

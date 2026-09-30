@@ -57,10 +57,10 @@ interface RecoverySuggestion {
     command: string | null;
     proposalId?: string;
 }
-declare function captureFingerprint(shell: ShellService | null | undefined, workdir: string): Promise<string | null>;
-declare function captureDiagnostics(shell: ShellService | null | undefined, workdir: string): Promise<string>;
-declare function runChecks(shell: ShellService | null | undefined, workdir: string, checks: readonly ExpectedCheck[]): Promise<string[]>;
-declare function verifyProposal(shell: ShellService | null | undefined, proposal: StoredProposal): Promise<ProposalVerification>;
+declare function captureFingerprint(shell: ShellService | null | undefined, workdir: string, policy?: unknown): Promise<string | null>;
+declare function captureDiagnostics(shell: ShellService | null | undefined, workdir: string, policy?: unknown): Promise<string>;
+declare function runChecks(shell: ShellService | null | undefined, workdir: string, checks: readonly ExpectedCheck[], policy?: unknown): Promise<string[]>;
+declare function verifyProposal(shell: ShellService | null | undefined, proposal: StoredProposal, policy?: unknown): Promise<ProposalVerification>;
 declare function executeProposalSteps(shell: ShellService, proposal: StoredProposal, signal?: AbortSignal, policy?: unknown): Promise<{
     ok: boolean;
     stepsResult: Array<{
@@ -76,7 +76,7 @@ declare function executeRegisteredProposal(shell: ShellService | null | undefine
  */
 declare function buildRecovery(_proposal: StoredProposal, failedStep: StoredProposal['steps'][number] | undefined, diagnostics: string): RecoverySuggestion | null;
 declare function buildRecoveryForCommand(cmd: string, text: string, reason?: string): RecoverySuggestion | null;
-declare function recoverFailedCommand(activeShell: ShellService | null | undefined, sessionId: string, workdir: string, operationId: string, action: string, command: string, message: string, errorOutput: string, errorCode: string, reason: string): Promise<{
+declare function recoverFailedCommand(activeShell: ShellService | null | undefined, sessionId: string, workdir: string, operationId: string, action: string, command: string, message: string, errorOutput: string, errorCode: string, reason: string, policy?: unknown): Promise<{
     failure: GitFailureContext;
     recovery?: {
         suggestion: string;

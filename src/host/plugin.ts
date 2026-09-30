@@ -227,54 +227,54 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-async function captureFingerprint(shell: ShellService | null | undefined, workdir: string): Promise<string | null> {
+async function captureFingerprint(shell: ShellService | null | undefined, workdir: string, policy?: unknown): Promise<string | null> {
   if (!shell) return null
   const command = "echo '--B--'; git branch --show-current 2>&1; echo '--H--'; git rev-parse HEAD 2>&1; echo '--S--'; git status --short 2>&1; echo '--L--'; git log --oneline -3 2>&1; echo '--T--'; git stash list 2>&1"
-  const r = await runGit(shell, workdir, command, 15000, 20000)
+  const r = await runGit(shell, workdir, command, 15000, 20000, undefined, policy)
   return ((r.stdout?.text ?? '') + (r.stderr?.text ?? '')).trim()
 }
 
-async function captureDiagnostics(shell: ShellService | null | undefined, workdir: string): Promise<string> {
+async function captureDiagnostics(shell: ShellService | null | undefined, workdir: string, policy?: unknown): Promise<string> {
   if (!shell) return ''
   const command = "echo '--STATUS--'; git status --short --branch 2>&1; echo '--LOG--'; git log --oneline -3 2>&1; echo '--BRANCH--'; git branch -vv 2>&1; echo '--REMOTE--'; git remote -v 2>&1"
-  const r = await runGit(shell, workdir, command, 15000, 20000)
+  const r = await runGit(shell, workdir, command, 15000, 20000, undefined, policy)
   return redactAndLimit(((r.stdout?.text ?? '') + (r.stderr?.text ?? '')).trim())
 }
 
-async function runChecks(shell: ShellService | null | undefined, workdir: string, checks: readonly ExpectedCheck[]): Promise<string[]> {
+async function runChecks(shell: ShellService | null | undefined, workdir: string, checks: readonly ExpectedCheck[], policy?: unknown): Promise<string[]> {
   if (!shell) return checks.map((check) => check.label)
   const failed: string[] = []
   for (const c of checks) {
     let pass = false
     try {
       if (c.type === 'branch') {
-        const r = await runGit(shell, workdir, 'git branch --show-current', 10000, 4096)
+        const r = await runGit(shell, workdir, 'git branch --show-current', 10000, 4096, undefined, policy)
         pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === c.value
       } else if (c.type === 'commit-msg') {
-        const r = await runGit(shell, workdir, 'git log -1 --pretty=%s', 10000, 4096)
+        const r = await runGit(shell, workdir, 'git log -1 --pretty=%s', 10000, 4096, undefined, policy)
         pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === c.value
       } else if (c.type === 'staged') {
         const paths = Array.isArray(c.value) ? c.value : String(c.value).split(/\s+/).filter(Boolean)
         pass = true
         for (const path of paths) {
-          const r = await runGit(shell, workdir, 'git diff --cached --quiet -- ' + quoteShellArg(path), 10000, 4096)
+          const r = await runGit(shell, workdir, 'git diff --cached --quiet -- ' + quoteShellArg(path), 10000, 4096, undefined, policy)
           if (r.exitCode !== 1) { pass = false; break }
         }
       } else if (c.type === 'branch-gone') {
-        const r = await runGit(shell, workdir, 'git branch --list ' + quoteShellArg(c.value), 10000, 4096)
+        const r = await runGit(shell, workdir, 'git branch --list ' + quoteShellArg(c.value), 10000, 4096, undefined, policy)
         pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === ''
       } else if (c.type === 'stash-nonempty') {
-        const r = await runGit(shell, workdir, 'git stash list', 10000, 4096)
+        const r = await runGit(shell, workdir, 'git stash list', 10000, 4096, undefined, policy)
         pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim().length > 0
       } else if (c.type === 'stash-empty') {
-        const r = await runGit(shell, workdir, 'git stash list', 10000, 4096)
+        const r = await runGit(shell, workdir, 'git stash list', 10000, 4096, undefined, policy)
         pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim().length === 0
       } else if (c.type === 'clean') {
         const paths = Array.isArray(c.value) ? c.value : String(c.value).split(/\s+/).filter(Boolean)
-        const r = await runGit(shell, workdir, 'git status --porcelain -- ' + paths.map(quoteShellArg).join(' '), 10000, 4096)
+        const r = await runGit(shell, workdir, 'git status --porcelain -- ' + paths.map(quoteShellArg).join(' '), 10000, 4096, undefined, policy)
         pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === ''
       } else if (c.type === 'no-ahead') {
-        const r = await runGit(shell, workdir, 'git rev-list --count @{u}..HEAD 2>&1', 10000, 4096)
+        const r = await runGit(shell, workdir, 'git rev-list --count @{u}..HEAD 2>&1', 10000, 4096, undefined, policy)
         pass = r.exitCode === 0 && (r.stdout?.text ?? '').trim() === '0'
       }
     } catch (e) { pass = false }
@@ -283,8 +283,8 @@ async function runChecks(shell: ShellService | null | undefined, workdir: string
   return failed
 }
 
-async function verifyProposal(shell: ShellService | null | undefined, proposal: StoredProposal): Promise<ProposalVerification> {
-  const now = await captureFingerprint(shell, proposal.workdir)
+async function verifyProposal(shell: ShellService | null | undefined, proposal: StoredProposal, policy?: unknown): Promise<ProposalVerification> {
+  const now = await captureFingerprint(shell, proposal.workdir, policy)
   const changed = now !== null && proposal.fingerprint !== null && now !== proposal.fingerprint
   const visibleState = redactAndLimit(now || '')
   const checks = deriveChecks(proposal.steps.map((s) => s.command))
@@ -300,7 +300,7 @@ async function verifyProposal(shell: ShellService | null | undefined, proposal: 
     }
   }
 
-  const failed = await runChecks(shell, proposal.workdir, checks)
+  const failed = await runChecks(shell, proposal.workdir, checks, policy)
   const baselineFailed = Array.isArray(proposal.baselineFailed) ? proposal.baselineFailed : []
   const transitioned = baselineFailed.length > 0 && failed.length === 0
   if (transitioned) return { changed, verified: true, partial: false, message: '', changedState: visibleState }
@@ -394,7 +394,7 @@ async function executeRegisteredProposal(
   const last = proposal.steps[proposal.steps.length - 1]
   const failedStep = proposal.steps.find((step) => step.result?.ok === false)
   const lastResult = (failedStep ? failedStep.result : last?.result) as StepExecutionResult | null | undefined
-  const diagnostics = ok ? '' : await captureDiagnostics(shell, proposal.workdir)
+  const diagnostics = ok ? '' : await captureDiagnostics(shell, proposal.workdir, policy)
   const error = ok ? '' : redactSecrets((lastResult && (lastResult.stderr || lastResult.stdout)) || 'git 退出码 ' + (lastResult ? lastResult.exitCode : -1))
   const failure: GitFailureContext | undefined = ok ? undefined : {
     source: 'proposal',
@@ -507,6 +507,7 @@ async function recoverFailedCommand(
   errorOutput: string,
   errorCode: string,
   reason: string,
+  policy?: unknown,
 ): Promise<{
   failure: GitFailureContext
   recovery?: { suggestion: string; command: string; proposalId: string | null }
@@ -524,7 +525,7 @@ async function recoverFailedCommand(
       proposalId: existing.proposalId,
     } }
   }
-  const diagnostics = await captureDiagnostics(activeShell, workdir)
+  const diagnostics = await captureDiagnostics(activeShell, workdir, policy)
   const failure: GitFailureContext = {
     source: 'workbench',
     code: errorCode,
@@ -727,6 +728,7 @@ const plugin = {
             return { ok: false, proposalId: '', intent: '', command: '', steps: [], explanation: '', risk: 'normal', reasons: [], workdir: '', error: '输入过长：intent 最多 500 字符、explanation 最多 4000 字符、workdir 最多 4096 字符' }
           }
           const workdir = sessionWorkdir(exec, args, ctx)
+          const policy = sandboxPolicy?.resolve({ session: exec.agent?.session })
           const rawCommands = Array.isArray(args.steps) && args.steps.length ? args.steps : (args.command ? [args.command] : [])
           if (rawCommands.length === 0) {
             return { ok: false, proposalId: '', intent: String(args.intent || ''), command: '', steps: [], explanation: String(args.explanation || ''), risk: 'normal', reasons: [], workdir: workdir || '', error: 'command 或 steps 至少提供一个' }
@@ -750,7 +752,7 @@ const plugin = {
             return { ok: false, proposalId: '', intent: String(args.intent || ''), command: '', steps: [], explanation: String(args.explanation || ''), risk: 'normal', reasons: [], workdir: workdir || '', error: '没有可执行的命令步骤' }
           }
           if (shell) {
-            const r = await runGit(shell, workdir, 'git rev-parse --show-toplevel', 15000, 4096, exec.signal)
+            const r = await runGit(shell, workdir, 'git rev-parse --show-toplevel', 15000, 4096, exec.signal, policy)
             if (r.exitCode !== 0) {
               const errText = ((r.stderr?.text ?? '') + ' ' + (r.stdout?.text ?? '')).trim()
               return { ok: false, proposalId: '', intent: String(args.intent || ''), command: steps.map((s) => s.command).join(' && '), steps: steps.map((s) => ({ command: s.command })), explanation: String(args.explanation || ''), risk: 'normal', reasons: [], workdir: workdir || '', error: '目标目录不是 git 仓库（workdir=' + (workdir || '默认工作目录') + '）：' + errText.slice(0, 200) }
@@ -830,9 +832,10 @@ const plugin = {
         },
         async execute(args, exec) {
           const workdir = sessionWorkdir(exec, args, ctx)
+          const policy = sandboxPolicy?.resolve({ session: exec.agent?.session })
           if (!shell) return { ok: false, isRepo: false, workdir: workdir || '', topLevel: '', branch: '', status: '', recentCommits: '', stashes: '', remotes: '', error: 'shell 服务不可用' }
           const command = "echo '__TOP__'; git rev-parse --show-toplevel 2>&1; echo '__BRANCH__'; git branch --show-current 2>&1; echo '__STATUS__'; git status --short --branch 2>&1; echo '__LOG__'; git log --oneline -8 2>&1; echo '__STASH__'; git stash list 2>&1; echo '__REMOTE__'; git remote -v 2>&1"
-          const r = await runGit(shell, workdir, command, 20000, 30000, exec.signal)
+          const r = await runGit(shell, workdir, command, 20000, 30000, exec.signal, policy)
           const text = (r.stdout?.text ?? '') + (r.stderr?.text ?? '')
           const keys = ['__TOP__', '__BRANCH__', '__STATUS__', '__LOG__', '__STASH__', '__REMOTE__'] as const
           const parts: Record<string, string> = {}
@@ -877,8 +880,8 @@ const plugin = {
       runChecks,
       verifyProposal,
       executeProposal: (activeShell, proposal, policy, persist) => executeRegisteredProposal(activeShell, proposal, undefined, policy, persist),
-      recoverFailedCommand: (sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason) => recoverFailedCommand(
-        shell, sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason,
+      recoverFailedCommand: (sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason, policy) => recoverFailedCommand(
+        shell, sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason, policy,
       ),
       resolveExecutionPolicy: async (sessionId) => {
         const context = await repositoryContextForSession(ctx, sandboxPolicy, sessionId)

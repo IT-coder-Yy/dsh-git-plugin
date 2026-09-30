@@ -267,12 +267,14 @@ test('HTTP 路由严格按 sessionId 隔离提议', async () => {
   let route = null
   const tools = { register: (definition) => registered.push(definition) }
   const webServer = { register: (definition) => { route = definition } }
+  const agents = { get: id => ['http-session-a', 'http-session-b', 'http-session-hard'].includes(id)
+    ? { id, session: { cwd: '/tmp/repo' } } : undefined }
   const shell = {
     resolve: (request) => ({ ...request, workdir: request.workdir || '/tmp/repo' }),
     run: async (spec) => ({ exitCode: 0, signal: null, timedOut: false, stdout: { text: spec.command.includes('rev-parse') ? '/tmp/repo\n' : 'ok\n' }, stderr: { text: '' } }),
   }
   plugin.apply({
-    get: (key) => key === 'tools' ? tools : key === 'shell' ? shell : key === 'webServer' ? webServer : null,
+    get: (key) => key === 'tools' ? tools : key === 'shell' ? shell : key === 'webServer' ? webServer : key === 'agents' ? agents : null,
     inject: (deps, callback) => {
       assert.deepStrictEqual(deps, ['webServer', 'connection'])
       return callback({ get: (key) => key === 'webServer' ? webServer : key === 'connection' ? { requestRejection: () => undefined } : null })
