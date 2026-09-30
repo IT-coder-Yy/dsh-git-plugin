@@ -29,9 +29,10 @@ interface MutationRequest {
 }
 export declare class GitRepositoryService {
     private readonly shell;
-    private readonly locks;
     private readonly operations;
     constructor(shell: ShellService | undefined);
+    proposalSnapshot(workdir: string, policy?: unknown): Promise<string>;
+    serializeProposal<T>(workdir: string, task: () => Promise<T>, policy?: unknown): Promise<T>;
     run(workdir: string, command: string, timeoutMs?: number, stdoutMaxBytes?: number, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<GitRunResult>;
     getTopLevel(workdir: string, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<ActionResult<{
         topLevel: string;

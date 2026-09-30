@@ -92,3 +92,103 @@ test('侧边会话写工具被拦截，主会话不受影响；执行反馈只�
   assert.equal(child.inbox.nextTurn.length, 1)
   assert.equal(f.parent.inbox.nextTurn.length, 0)
 })
+
+test('真实仓库快照识别同状态内容变化、未跟踪文件变化及分支变化', async () => {
+  const dir = createRepo()
+  try {
+    const repository = new helpers.GitRepositoryService(makeShell(dir))
+    fs.writeFileSync(dir + '/a.txt', 'first\n')
+    const first = await repository.proposalSnapshot(dir)
+    fs.writeFileSync(dir + '/a.txt', 'other\n')
+    const other = await repository.proposalSnapshot(dir)
+    assert.notEqual(first, other)
+    fs.writeFileSync(dir + '/new.txt', 'aaa')
+    const untracked = await repository.proposalSnapshot(dir)
+    fs.writeFileSync(dir + '/new.txt', 'bbb')
+    assert.notEqual(untracked, await repository.proposalSnapshot(dir))
+    const before = await repository.proposalSnapshot(dir)
+    await repository.run(dir, 'git branch extra')
+    assert.notEqual(before, await repository.proposalSnapshot(dir))
+  } finally { cleanup(dir) }
+})
+
+test('建议与工作台共享仓库锁，不同实例对同仓库写入串行', async () => {
+  const dir = createRepo()
+  try {
+    const first = new helpers.GitRepositoryService(makeShell(dir)), second = new helpers.GitRepositoryService(makeShell(dir))
+    let release, entered
+    const started = new Promise(resolve => { entered = resolve })
+    const pending = new Promise(resolve => { release = resolve })
+    const held = first.serializeProposal(dir, async () => { entered(); await pending })
+    await started
+    let finished = false
+    const mutation = second.stageAll({ sessionId: 's', workdir: dir, operationId: 'stage' }).then(result => { finished = true; assert.equal(result.ok, true) })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    assert.equal(finished, false)
+    release()
+    await Promise.all([held, mutation])
+  } finally { cleanup(dir) }
+})
+
+test('侧边提议归属主会话；过期拒绝、成功与重复执行反馈隔离', async () => {
+  const dir = createRepo(), f = fixture(), registered = new Map()
+  try {
+    for (const a of f.agents.values()) a.session.header.cwd = dir
+    const baseGet = f.ctx.get
+    const realShell = makeShell(dir)
+    const policy = { mode: 'workspace-write', workspaceRoot: dir, sessionId: 'main' }
+    const requests = []
+    const services = {
+      shell: { ...realShell, resolve(request) {
+        requests.push(request)
+        assert.deepEqual(request.sandboxPolicy, policy, '每次 Git 读取和写入均应继承主会话策略')
+        return { ...realShell.resolve(request), sandboxPolicy: request.sandboxPolicy }
+      } },
+      sandboxPolicy: { resolve: ({ session }) => ({ ...policy, sessionId: session.header.id }) },
+      tools: { ...baseGet('tools'), register: tool => registered.set(tool.name, tool) },
+      connection: { requestRejection: () => undefined },
+      webServer: { register: route => { services.route = route } },
+    }
+    f.ctx.get = key => services[key] ?? baseGet(key)
+    require('../lib').apply(f.ctx)
+    const { EventEmitter } = require('node:events')
+    const http = body => new Promise(resolve => {
+      const req = new EventEmitter(); req.method = 'POST'; req.headers = { 'content-type': 'application/json' }
+      services.route.handler(req, { writeHead() {}, end: text => resolve(JSON.parse(text)) })
+      queueMicrotask(() => { req.emit('data', Buffer.from(JSON.stringify({ sessionId: 'main', ...body }))); req.emit('end') })
+    })
+    const opened = await http({ action: 'side-chat' }); assert.equal(opened.ok, true)
+    const child = f.agents.get(opened.sessionId); child.session.header.cwd = dir
+    const state = await registered.get('git_repo_state').execute({}, { agent: child })
+    assert.equal(state.isRepo, true)
+    assert.equal(state.topLevel, dir)
+    const propose = command => registered.get('git_propose').execute({ command, intent: 'test' }, { agent: child })
+    const old = await propose('git branch stale'); assert.equal(old.ok, true)
+    assert.equal(helpers.findProposal('main', old.proposalId).chatSessionId, child.id)
+    assert.equal(helpers.findProposal(child.id, old.proposalId), undefined)
+    fs.writeFileSync(dir + '/a.txt', 'external change\n')
+    assert.match((await http({ action: 'execute', proposalId: old.proposalId })).error, /仓库已变化/)
+    assert.equal(child.inbox.nextTurn.length, 1)
+    await http({ action: 'execute', proposalId: old.proposalId })
+    assert.equal(child.inbox.nextTurn.length, 1, '重复请求不应再次唤醒模型')
+    const fresh = await propose('git branch fresh'); assert.equal(fresh.ok, true)
+    assert.equal((await http({ action: 'execute', proposalId: fresh.proposalId })).ok, true)
+    assert.equal(child.inbox.nextTurn.length, 2)
+    const failed = await propose('git switch -c main')
+    const failure = await http({ action: 'execute', proposalId: failed.proposalId })
+    assert.equal(failure.ok, false)
+    const recovery = helpers.findProposal('main', failure.recovery.proposalId)
+    assert.equal(recovery.chatSessionId, child.id)
+    assert.match(recovery.repositorySnapshot, /^[a-f0-9]{64}$/)
+    assert.equal(f.parent.inbox.nextTurn.length, 0)
+    const manual = await propose('git switch -c manual-policy')
+    assert.equal((await http({ action: 'mark-copied', proposalId: manual.proposalId })).ok, true)
+    assert.equal((await http({ action: 'verify', proposalId: manual.proposalId })).verified, false)
+    await realShell.run(realShell.resolve({ command: 'git switch -c manual-policy', workdir: dir }))
+    assert.equal((await http({ action: 'verify', proposalId: manual.proposalId })).verified, true)
+    assert.ok(requests.length > 10)
+    const { execFileSync } = require('node:child_process')
+    const branches = execFileSync('git', ['branch', '--list'], { cwd: dir, encoding: 'utf8' })
+    assert.match(branches, /fresh/); assert.doesNotMatch(branches, /stale/)
+  } finally { cleanup(dir) }
+})

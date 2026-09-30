@@ -1,5 +1,6 @@
 import { conflictWorkerCommand } from './conflict-worker'
 import { createStashCommand } from './stash-worker'
+import { proposalSnapshotCommand } from './proposal-snapshot'
 import type {
   ActionErrorCode,
   ActionFailureReason,
@@ -205,11 +206,37 @@ function parseCommitFiles(nameStatus: string, numstat: string): { files: CommitF
 
 const repositoryLocks = new Map<string, Promise<void>>()
 
+async function serializeRepository<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = repositoryLocks.get(key) ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>(resolve => { release = resolve })
+  const queued = previous.then(() => current)
+  repositoryLocks.set(key, queued)
+  await previous
+  try { return await task() }
+  finally {
+    release()
+    if (repositoryLocks.get(key) === queued) repositoryLocks.delete(key)
+  }
+}
+
 export class GitRepositoryService {
-  private readonly locks = repositoryLocks
   private readonly operations = new Map<string, { createdAt: number; result: Promise<ActionResult<unknown>> }>()
 
   constructor(private readonly shell: ShellService | undefined) {}
+
+  async proposalSnapshot(workdir: string, policy?: unknown): Promise<string> {
+    const result = await this.run(workdir, proposalSnapshotCommand, 30_000, 4096, undefined, policy)
+    const snapshot = result.stdout?.text?.trim() ?? ''
+    if (result.exitCode !== 0 || !/^[a-f0-9]{64}$/.test(snapshot)) throw new Error('无法校验仓库快照：' + (result.stderr?.text ?? '读取失败'))
+    return snapshot
+  }
+
+  async serializeProposal<T>(workdir: string, task: () => Promise<T>, policy?: unknown): Promise<T> {
+    const repository = await this.getTopLevel(workdir, undefined, policy)
+    if (!repository.ok) throw new Error(repository.message)
+    return serializeRepository(repository.data.topLevel, task)
+  }
 
   async run(workdir: string, command: string, timeoutMs = 20_000, stdoutMaxBytes = 30_000, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<GitRunResult> {
     if (!this.shell) return { exitCode: -1, stderr: { text: 'shell 服务不可用' } }
@@ -803,20 +830,7 @@ export class GitRepositoryService {
     const existing = this.operations.get(key)
     if (existing) return existing.result as Promise<ActionResult<T>>
 
-    const lockKey = repository.data.topLevel
-    const previous = this.locks.get(lockKey) ?? Promise.resolve()
-    let release: () => void = () => {}
-    const current = new Promise<void>((resolve) => { release = resolve })
-    const queued = previous.then(() => current)
-    this.locks.set(lockKey, queued)
-    const result = previous.then(async () => {
-      try {
-        return await task()
-      } finally {
-        release()
-        if (this.locks.get(lockKey) === queued) this.locks.delete(lockKey)
-      }
-    })
+    const result = serializeRepository(repository.data.topLevel, task)
     this.operations.set(key, { createdAt: Date.now(), result: result as Promise<ActionResult<unknown>> })
     return result
   }

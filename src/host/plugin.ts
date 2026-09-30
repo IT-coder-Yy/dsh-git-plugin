@@ -682,6 +682,7 @@ const plugin = {
     const sandboxPolicy = ctx.get<SandboxPolicyService | null>('sandboxPolicy')
     const repository = new GitRepositoryService(shell ?? undefined)
     const proposalStorageReady = connectProposalStorage(ctx)
+    const chats = new SideChatService(ctx as unknown as Record<string, any>)
 
     if (tools) {
       tools.register({
@@ -719,7 +720,9 @@ const plugin = {
         },
         async execute(args, exec) {
           await proposalStorageReady
-          const sessionId = sessionIdOf(exec)
+          await chats.ready
+          const agentSessionId = sessionIdOf(exec)
+          const sessionId = agentSessionId && (chats.parentOf(agentSessionId) ?? agentSessionId)
           if (!sessionId) {
             return { ok: false, proposalId: '', intent: String((args && args.intent) || ''), command: '', steps: [], explanation: String((args && args.explanation) || ''), risk: 'normal', reasons: [], workdir: '', error: '当前工具调用缺少会话身份，拒绝创建无法隔离的提议' }
           }
@@ -727,8 +730,9 @@ const plugin = {
           if (String(args.intent || '').length > 500 || String(args.explanation || '').length > 4000 || String(args.workdir || '').length > 4096) {
             return { ok: false, proposalId: '', intent: '', command: '', steps: [], explanation: '', risk: 'normal', reasons: [], workdir: '', error: '输入过长：intent 最多 500 字符、explanation 最多 4000 字符、workdir 最多 4096 字符' }
           }
-          const workdir = sessionWorkdir(exec, args, ctx)
-          const policy = sandboxPolicy?.resolve({ session: exec.agent?.session })
+          const sideContext = chats.parentOf(agentSessionId!) ? await repositoryContextForSession(ctx, sandboxPolicy, sessionId) : null
+          const workdir = sideContext?.workdir ?? sessionWorkdir(exec, args, ctx)
+          const policy = sideContext?.policy ?? sandboxPolicy?.resolve({ session: exec.agent?.session })
           const rawCommands = Array.isArray(args.steps) && args.steps.length ? args.steps : (args.command ? [args.command] : [])
           if (rawCommands.length === 0) {
             return { ok: false, proposalId: '', intent: String(args.intent || ''), command: '', steps: [], explanation: String(args.explanation || ''), risk: 'normal', reasons: [], workdir: workdir || '', error: 'command 或 steps 至少提供一个' }
@@ -785,6 +789,10 @@ const plugin = {
             closed: false,
             copied: false,
             fingerprint: null,
+            ...(chats.parentOf(agentSessionId!) ? {
+              chatSessionId: agentSessionId,
+              repositorySnapshot: await repository.proposalSnapshot(workdir || '', policy),
+            } : {}),
             verified: false,
             status: 'pending',
             ...(analysisSource?.failure ? {
@@ -831,8 +839,11 @@ const plugin = {
           render(_args, value) { return [{ type: 'text', text: JSON.stringify(value, null, 2) }] },
         },
         async execute(args, exec) {
-          const workdir = sessionWorkdir(exec, args, ctx)
-          const policy = sandboxPolicy?.resolve({ session: exec.agent?.session })
+          await chats.ready
+          const parent = chats.parentOf(sessionIdOf(exec) ?? '')
+          const context = parent ? await repositoryContextForSession(ctx, sandboxPolicy, parent) : null
+          const workdir = context?.workdir ?? sessionWorkdir(exec, args, ctx)
+          const policy = context?.policy ?? sandboxPolicy?.resolve({ session: exec.agent?.session })
           if (!shell) return { ok: false, isRepo: false, workdir: workdir || '', topLevel: '', branch: '', status: '', recentCommits: '', stashes: '', remotes: '', error: 'shell 服务不可用' }
           const command = "echo '__TOP__'; git rev-parse --show-toplevel 2>&1; echo '__BRANCH__'; git branch --show-current 2>&1; echo '__STATUS__'; git status --short --branch 2>&1; echo '__LOG__'; git log --oneline -8 2>&1; echo '__STASH__'; git stash list 2>&1; echo '__REMOTE__'; git remote -v 2>&1"
           const r = await runGit(shell, workdir, command, 20000, 30000, exec.signal, policy)
@@ -870,6 +881,7 @@ const plugin = {
     const registerWebServer = (webServer: WebServerService | null, connection: ConnectionService | null): unknown => registerEasyGitActions(webServer, {
       repository,
       proposalStorageReady,
+      openChat: (sessionId) => chats.open(sessionId),
       shell,
       repositoryContext: (sessionId) => repositoryContextForSession(ctx, sandboxPolicy, sessionId),
       latestPending,
@@ -879,7 +891,32 @@ const plugin = {
       captureFingerprint,
       runChecks,
       verifyProposal,
-      executeProposal: (activeShell, proposal, policy, persist) => executeRegisteredProposal(activeShell, proposal, undefined, policy, persist),
+      executeProposal: async (activeShell, proposal, policy, persist) => {
+        let sendFeedback = false
+        const result = await repository.serializeProposal(proposal.workdir, async () => {
+          if (proposal.closed || proposal.status !== 'pending') return executeRegisteredProposal(activeShell, proposal, undefined, policy, persist)
+          sendFeedback = true
+          if (typeof proposal.repositorySnapshot === 'string' && proposal.repositorySnapshot !== await repository.proposalSnapshot(proposal.workdir, policy)) {
+            proposal.status = 'dismissed'
+            proposal.closed = true
+            await persist()
+            return executionError(proposal, '仓库已变化，此建议已失效；请让 Git 助手重新分析并生成建议')
+          }
+          const execution = await executeRegisteredProposal(activeShell, proposal, undefined, policy, persist)
+          const recovery = execution.recovery?.proposalId && findProposal(proposal.sessionId, execution.recovery.proposalId)
+          if (proposal.chatSessionId && recovery) {
+            recovery.chatSessionId = proposal.chatSessionId
+            recovery.repositorySnapshot = await repository.proposalSnapshot(proposal.workdir, policy)
+            await persist()
+          }
+          return execution
+        }, policy)
+        if (sendFeedback && proposal.chatSessionId) {
+          try { await chats.feedback(proposal.sessionId, proposal.proposalId, result) }
+          catch (error) { result.feedbackError = '执行结果未送达 Git 助手：' + errorMessage(error) }
+        }
+        return result
+      },
       recoverFailedCommand: (sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason, policy) => recoverFailedCommand(
         shell, sessionId, workdir, operationId, action, command, message, errorOutput, errorCode, reason, policy,
       ),

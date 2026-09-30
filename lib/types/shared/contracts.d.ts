@@ -269,6 +269,7 @@ export interface ProposalCommandResponse {
     changedState?: string;
 }
 export interface ProposalExecutionResponse extends ProposalCommandResponse {
+    feedbackError?: string;
     proposalId?: string;
     command?: string;
     steps?: Array<{
@@ -287,6 +288,9 @@ export interface ProposalExecutionResponse extends ProposalCommandResponse {
     analysis?: AgentAnalysisRequest;
 }
 export interface EasyGitRequestMap {
+    'side-chat': {
+        sessionId: string;
+    };
     'get-commit-edit-state': {
         sessionId: string;
     };
@@ -509,6 +513,13 @@ export interface EasyGitRequestMap {
     };
 }
 export interface EasyGitResponseMap {
+    'side-chat': {
+        ok: true;
+        sessionId: string;
+    } | {
+        ok: false;
+        error: string;
+    };
     'get-commit-edit-state': ActionResult<CommitEditState>;
     'amend-message': ActionResult<ConflictState>;
     'amend-commit': ActionResult<ConflictState>;

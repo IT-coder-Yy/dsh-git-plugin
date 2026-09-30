@@ -34,6 +34,7 @@ interface RepositoryContext {
 interface EasyGitActionDependencies {
   repository: GitRepositoryService
   proposalStorageReady: Promise<void>
+  openChat?(sessionId: string): Promise<unknown>
   shell: ShellService | null
   repositoryContext(sessionId: string): Promise<RepositoryContext | null>
   latestPending(sessionId: string): StoredProposal | null
@@ -221,6 +222,7 @@ async function dispatchRepositoryAction(
   dependencies: EasyGitActionDependencies,
 ): Promise<unknown> {
   if (!context) return { ok: false, code: 'SESSION_NOT_FOUND', message: '无法确定当前会话的仓库目录' }
+
   const repository = dependencies.repository
   const base = { sessionId, workdir: context.workdir, operationId: body.operationId, sandboxPolicy: context.policy }
   if (action === 'get-commit-edit-state') return repository.conflictAction(action, context.workdir, body, undefined, context.policy)
@@ -385,6 +387,11 @@ export function registerEasyGitActions(webServer: WebServerService | null, depen
 
       try {
         await dependencies.proposalStorageReady
+        if (action === 'side-chat') {
+          if (!dependencies.openChat) throw new Error('侧边聊天服务不可用')
+          sendJson(res, 200, await dependencies.openChat(sessionId))
+          return
+        }
         if (isRepositoryAction(action)) {
           const context = await dependencies.repositoryContext(sessionId)
           const result = await dispatchRepositoryAction(action, sessionId, body, context, dependencies)
