@@ -1,0 +1,43 @@
+name: Publish npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: Validate version against Release tag
+        id: release
+        run: node scripts/prepare-release.mjs
+      - run: npm ci --include=dev
+      # Check committed artifacts before any other command rebuilds lib/.
+      - run: npm run verify:build
+      - run: npm run lint
+      - run: npm test
+      - run: npm pack --dry-run --ignore-scripts
+      - name: Publish with npm trusted publishing
+        env:
+          NPM_DIST_TAG: ${{ steps.release.outputs.dist-tag }}
+        # Checks already ran above; do not rebuild after validation.
+        run: npm publish --ignore-scripts --access public --tag "$NPM_DIST_TAG"
