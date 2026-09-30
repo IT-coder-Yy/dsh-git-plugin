@@ -158,17 +158,30 @@ function validStashPath(path: unknown): path is string {
 }
 
 function parseCommitFiles(nameStatus: string, numstat: string): { files: CommitFileChange[]; filesTruncated: boolean; totals: CommitDetail['totals'] } {
-  const statusRows = nameStatus.split('\n').filter(Boolean)
-  const statRows = numstat.split('\n').filter(Boolean)
+  const statusFields = nameStatus.split('\0')
+  const statusRows: Array<{ status: string; path: string; previousPath?: string }> = []
+  for (let index = 0; index < statusFields.length - 1;) {
+    const status = statusFields[index++]!
+    const path = statusFields[index++] ?? ''
+    statusRows.push(/^[RC]/.test(status)
+      ? { status, previousPath: path, path: statusFields[index++] ?? '' }
+      : { status, path })
+  }
+  const statFields = numstat.split('\0')
+  const statRows: string[] = []
+  for (let index = 0; index < statFields.length - 1; index++) {
+    const row = statFields[index]!
+    statRows.push(row)
+    // With -z, a rename has an empty pathname followed by old and new names.
+    if (/^[^\t]*\t[^\t]*\t$/.test(row)) index += 2
+  }
   let additions = 0
   let deletions = 0
   let binary = 0
-  const files = statusRows.slice(0, COMMIT_FILE_MAX).map((line, index) => {
-    const parts = line.split('\t')
-    const status = parts[0] ?? ''
-    const renamed = /^[RC]/.test(status) && parts.length >= 3
-    const path = redactAndLimit(renamed ? parts[2] ?? '' : parts[1] ?? '', 4096)
-    const previousPath = renamed ? redactAndLimit(parts[1] ?? '', 4096) : undefined
+  const files = statusRows.slice(0, COMMIT_FILE_MAX).map((row, index) => {
+    const { status } = row
+    const path = redactAndLimit(row.path, 4096)
+    const previousPath = row.previousPath ? redactAndLimit(row.previousPath, 4096) : undefined
     const stat = (statRows[index] ?? '').split('\t')
     const added = /^\d+$/.test(stat[0] ?? '') ? Number(stat[0]) : null
     const deleted = /^\d+$/.test(stat[1] ?? '') ? Number(stat[1]) : null
@@ -364,11 +377,11 @@ export class GitRepositoryService {
     const range = comparisonBase ? quoteShellArg(comparisonBase) + ' ' + quoteShellArg(resolvedHash) : quoteShellArg(resolvedHash)
     const [nameStatusResult, numstatResult] = await Promise.all([
       this.run(workdir, comparisonBase
-        ? 'git diff ' + common + ' --name-status ' + range + ' --'
-        : 'git diff-tree --root --no-commit-id --name-status -r -M ' + range + ' --', 20_000, COMMIT_DETAIL_MAX_CHARS, signal, sandboxPolicy),
+        ? 'git diff ' + common + ' --name-status -z ' + range + ' --'
+        : 'git diff-tree --root --no-commit-id --name-status -z -r -M ' + range + ' --', 20_000, COMMIT_DETAIL_MAX_CHARS, signal, sandboxPolicy),
       this.run(workdir, comparisonBase
-        ? 'git diff ' + common + ' --numstat ' + range + ' --'
-        : 'git diff-tree --root --no-commit-id --numstat -r -M ' + range + ' --', 20_000, COMMIT_DETAIL_MAX_CHARS, signal, sandboxPolicy),
+        ? 'git diff ' + common + ' --numstat -z ' + range + ' --'
+        : 'git diff-tree --root --no-commit-id --numstat -z -r -M ' + range + ' --', 20_000, COMMIT_DETAIL_MAX_CHARS, signal, sandboxPolicy),
     ])
     if (nameStatusResult.exitCode !== 0 || numstatResult.exitCode !== 0) {
       return errorResult('GIT_FAILED', '无法读取提交变更摘要', redactAndLimit(outputOf(nameStatusResult) + '\n' + outputOf(numstatResult), 8192))
