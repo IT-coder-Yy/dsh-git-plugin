@@ -63,7 +63,7 @@ export declare function mutationCommand(action: string, payload?: AnyRecord): {
 export declare function recoveryProposalId(response: unknown): string | null;
 export declare function analysisProposalId(response: unknown): string | null;
 export declare function failureContext(response: unknown): GitFailureContext | null;
-export declare function buildAgentRepairPrompt(failure: GitFailureContext): string;
+export { buildAgentRepairPrompt } from '../shared/analysis';
 export declare function shouldShowAnalysisBanner(tab: string, pendingAnalysis: unknown): boolean;
 export declare function canDismissFailedProposal(needsAgentAnalysis: unknown): boolean;
 export declare function pendingProposalTransition(previousProposalId: string | null, proposal: unknown): {
