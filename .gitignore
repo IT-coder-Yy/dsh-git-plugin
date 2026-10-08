@@ -7,6 +7,9 @@ build/
 coverage/
 *.map
 
+# 本地设计预览与功能验收产物
+/output/
+
 # 仅供本地开发与发布验收的内部文档
 /docs/git-workbench-refactor-plan.zh-CN.md
 /docs/release-test-checklist.zh-CN.md
