@@ -723,8 +723,8 @@ export class GitRepositoryService {
   }
 
   async commit(request: MutationRequest, message: unknown): Promise<ActionResult<RepositorySummary>> {
-    if (typeof message !== 'string' || !message.trim() || message.length > 4096 || /[\0\r\n]/.test(message)) {
-      return errorResult('INVALID_ARGUMENT', '提交信息必须为 1–4096 个非换行字符')
+    if (typeof message !== 'string' || !message.trim() || message.length > 4096 || message.includes('\0')) {
+      return errorResult('INVALID_ARGUMENT', '提交信息必须为 1–4096 个字符，且不能包含空字符')
     }
     return this.mutate(request, 'git commit -m ' + quoteShellArg(message.trim()), true, '提交失败')
   }

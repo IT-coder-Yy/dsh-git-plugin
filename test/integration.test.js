@@ -111,6 +111,32 @@ test('AI 提交说明接口使用暂存内容、项目背景和会话模型；�
   } finally { cleanup(dir) }
 })
 
+test('普通提交保留多行说明与 Shell 特殊字符，拒绝无效说明且只提交暂存内容', async () => {
+  const dir = createRepo()
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trimEnd()
+  const repository = new helpers.GitRepositoryService(makeShell(dir))
+  let sequence = 0
+  const request = () => ({ sessionId: 'multiline-commit', workdir: dir, operationId: 'commit-' + ++sequence })
+  try {
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'staged\n')
+    git('add', 'a.txt')
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'unstaged\n')
+    const head = git('rev-parse', 'HEAD')
+    for (const message of ['', ' \n\t ', null, 'x'.repeat(4097), 'title\0body']) {
+      assert.equal((await repository.commit(request(), message)).code, 'INVALID_ARGUMENT')
+      assert.equal(git('rev-parse', 'HEAD'), head)
+    }
+    const message = "fix: 保留多行说明\n\n包含 '引号'、$(touch injected-file) 与 `touch injected-file`。"
+    const result = await repository.commit(request(), message)
+    assert.equal(result.ok, true, JSON.stringify(result))
+    assert.equal(git('log', '-1', '--format=%B'), message)
+    assert.equal(git('show', 'HEAD:a.txt'), 'staged')
+    assert.equal(fs.readFileSync(path.join(dir, 'a.txt'), 'utf8'), 'unstaged\n')
+    assert.equal(git('diff', '--cached', '--name-only'), '')
+    assert.equal(fs.existsSync(path.join(dir, 'injected-file')), false)
+  } finally { cleanup(dir) }
+})
+
 test('新版 DSH shell.execute 的结果可用于仓库读取和命令诊断', async () => {
   const dir = createRepo()
   try {
