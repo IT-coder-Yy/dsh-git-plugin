@@ -163,7 +163,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-conflict-gutter { flex: none; height: 100%; overflow: hidden; padding: 8px 0 28px; border-right: 1px solid rgba(127,127,127,.2); }
         .gg-conflict-gutter .gg-conflict-line-number { display: block; height: 20px; }
         .gg-conflict-line-number.unresolved { color: var(--gg-warning-label); background: color-mix(in srgb, var(--gg-warning) 22%, transparent); box-shadow: inset 3px 0 var(--gg-warning); }
-        .gg-conflict-block { border-left: 3px solid #d09b38; padding: 10px; margin: 12px 0; background: rgba(127,127,127,.06); }
+        .gg-conflict-block { border-left: 3px solid var(--gg-warning); padding: 10px; margin: 12px 0; background: color-mix(in srgb, var(--gg-warning) 8%, transparent); }
         .gg-conflict-block-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
         .gg-conflict-block pre { overflow: auto; max-height: 220px; padding: 8px; font: 12px/20px monospace; }
         .gg-dock { margin: 2px 0; padding: 6px 10px; font-size: 13px; line-height: 1.5; color: inherit; }
@@ -201,12 +201,6 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-pre { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; background: rgba(127,127,127,.1); border-radius: 6px; padding: 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 4px 0; }
         .gg-ok { color: #0a7d33; font-weight: 600; }
         .gg-fail { color: #c62828; font-weight: 600; }
-        .gg-workbench-action { position: relative; display: inline-flex; height: 28px; align-items: center; gap: 5px; border: 0; border-radius: 8px; padding: 0 8px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); font-size: 13px; line-height: 20px; font-weight: 500; transition: background-color 100ms ease, box-shadow 100ms ease, color 100ms ease; }
-        .gg-workbench-action:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); box-shadow: var(--dsw-shadow-lv1, 0 2px 4px rgba(0,0,0,.12)); }
-        .gg-workbench-action:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3964fe); outline-offset: 2px; }
-        .gg-workbench-action[aria-pressed="true"] { border: 0; background: var(--dsw-alias-button-ghost-active-fill, rgba(127,127,127,.16)); color: var(--dsw-alias-state-business-primary, #3964fe); }
-        .gg-workbench-action[aria-pressed="true"]:hover:not(:disabled) { background: var(--dsw-alias-button-ghost-active-hover, rgba(127,127,127,.22)); }
-        .gg-workbench-action-dot { width: 6px; height: 6px; border-radius: 50%; background: #e17b00; display: inline-block; }
         .gg-workbench { position: relative; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid rgba(174,180,184,.75); color: #e9ecef; background: #202224; box-shadow: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
         .gg-workbench-head { box-sizing: border-box; display: flex; min-height: 75px; flex: none; align-items: center; gap: 8px; padding: 14px 12px 12px; border-bottom: 1px solid #aeb4b8; }
         .gg-workbench-title { font-size: 14px; line-height: 20px; font-weight: 500; color: #f4f4f4; }
@@ -349,31 +343,45 @@ interface SyncTabProps extends RepositoryTabProps {}
           .gg-diff { min-height: 0; }
         }
 
-        /* EasyGit visual foundation: dense developer tooling, aligned with the host UI. */
-        .gg-workbench {
+        /* Shared by the workbench and the composer entry, which lives outside it. */
+        .gg-workbench, .gg-dock, .gg-workbench-action {
           --gg-bg: var(--dsw-alias-bg-base, #f7f7f8);
           --gg-surface: var(--dsw-alias-bg-layer-1, #fff);
           --gg-surface-raised: var(--dsw-alias-bg-layer-2, #f1f2f3);
-          --gg-surface-inset: var(--dsw-alias-markdown-code-block, var(--gg-surface-raised));
+          --gg-surface-inset: color-mix(in srgb, var(--gg-bg) 96%, var(--gg-text));
           --gg-border: var(--dsw-alias-border-l2, rgba(15, 17, 21, .12));
           --gg-border-strong: var(--dsw-alias-border-l3, rgba(15, 17, 21, .18));
           --gg-text: var(--dsw-alias-label-primary, #0f1115);
           --gg-text-secondary: var(--dsw-alias-label-secondary, #353638);
           --gg-text-muted: var(--dsw-alias-label-tertiary, #666a70);
           --gg-text-caption: var(--dsw-alias-label-caption, #81858c);
-          --gg-accent: var(--dsw-alias-state-business-primary, #3964fe);
-          --gg-accent-strong: var(--dsw-alias-state-business-primary, #3964fe);
-          --gg-accent-soft: color-mix(in srgb, var(--gg-accent) 14%, transparent);
+          --gg-accent: var(--dsw-alias-brand-primary, var(--gg-text));
+          --gg-accent-strong: var(--gg-text);
+          --gg-accent-soft: color-mix(in srgb, var(--gg-text) 7%, transparent);
+          /* Chrome stays neutral; repository states retain their semantic colors. */
           --gg-success: var(--dsw-alias-state-success-primary, #169c46);
-          --gg-success-label: color-mix(in srgb, var(--gg-success) 64%, var(--gg-text));
+          --gg-success-label: color-mix(in srgb, var(--gg-success) 55%, var(--gg-text));
           --gg-warning: var(--dsw-alias-state-warn-primary, #b66a00);
-          --gg-warning-label: var(--dsw-alias-state-warn-label, #9d5d00);
+          --gg-warning-label: color-mix(in srgb, var(--dsw-alias-state-warn-label, #9d5d00) 64%, var(--gg-text));
           --gg-danger: var(--dsw-alias-state-error-primary, #d13f3f);
-          --gg-danger-label: color-mix(in srgb, var(--gg-danger) 82%, var(--gg-text));
+          --gg-danger-label: color-mix(in srgb, var(--gg-danger) 77%, var(--gg-text));
+          --gg-info: var(--dsw-alias-state-business-primary, #3964fe);
+          --gg-info-label: color-mix(in srgb, var(--gg-info) 72%, var(--gg-text));
+          --gg-tag: color-mix(in srgb, #9d5bd2 72%, var(--gg-text));
           --gg-text-subtle: color-mix(in srgb, var(--gg-text-muted) 72%, var(--gg-text));
-          --gg-radius: 8px;
-          --gg-radius-control: 6px;
-          --gg-focus: 0 0 0 2px color-mix(in srgb, var(--gg-accent) 28%, transparent);
+          --gg-radius: 10px;
+          --gg-radius-control: 8px;
+          --gg-focus: 0 0 0 2px var(--gg-bg), 0 0 0 3px var(--gg-text-muted);
+          --gg-contact-shadow: 0 1px 2px #00000014;
+          --gg-panel-shadow: var(--dsw-shadow-lv1, 0 2px 4px #0000000d);
+          --gg-edge: color-mix(in srgb, var(--gg-surface) 88%, #fff);
+          --gg-button-top: color-mix(in srgb, var(--gg-surface-raised) 96%, #fff);
+          --gg-button-bottom: color-mix(in srgb, var(--gg-surface-raised) 97%, #000);
+          --gg-primary: var(--dsw-alias-button-primary-fill, var(--gg-text));
+          --gg-inverse: var(--dsw-alias-label-primary-foreground, #fff);
+          --gg-ease: cubic-bezier(.23, 1, .32, 1);
+        }
+        .gg-workbench {
           container-name: easygit-workbench;
           container-type: inline-size;
           border-left-color: var(--gg-border-strong);
@@ -390,7 +398,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-command-code, .gg-review, .gg-diff-code, .gg-stepcode {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }
-        .gg-workbench ::selection, .gg-dock ::selection { color: var(--gg-text, #0f1115); background: color-mix(in srgb, var(--gg-accent, #3964fe) 28%, transparent); }
+        .gg-workbench ::selection, .gg-dock ::selection { color: var(--gg-text); background: color-mix(in srgb, var(--gg-accent) 20%, transparent); }
         .gg-workbench ::-webkit-scrollbar { width: 9px; height: 9px; }
         .gg-workbench ::-webkit-scrollbar-track { background: transparent; }
         .gg-workbench ::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: var(--dsw-alias-scrollbar-bg-l2, var(--gg-border-strong)); background-clip: padding-box; }
@@ -415,9 +423,6 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-workbench-close:hover:not(:disabled) { color: var(--gg-text); background: var(--gg-surface-raised); }
         .gg-workbench-close:active:not(:disabled) { transform: translateY(1px); }
         .gg-workbench-body { padding: 0 12px 12px; }
-          background: var(--gg-accent);
-          box-shadow: 0 0 0 1px color-mix(in srgb, var(--gg-accent) 18%, transparent);
-        }
 
         .gg-tabs {
           position: sticky;
@@ -460,48 +465,69 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-tab-toolbar { min-height: 34px; gap: 8px; }
         .gg-tab-toolbar > .gg-idletext:first-child, .gg-repository-identity { margin-right: auto; }
         .gg-section-heading { margin-right: auto; color: var(--gg-text); font-size: 14px; line-height: 22px; font-weight: 680; letter-spacing: -.01em; }
-        .gg-section-count { display: inline-grid; min-width: 21px; height: 21px; margin-left: 7px; place-items: center; border-radius: 999px; padding: 0 6px; color: var(--gg-text-secondary); background: var(--gg-surface-raised); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 21px; font-weight: 650; }
+        .gg-section-count { display: inline-grid; min-width: 21px; height: 21px; margin-left: 7px; place-items: center; border-radius: 5px; padding: 0 6px; color: var(--gg-text-secondary); background: var(--gg-surface-inset); box-shadow: inset 0 1px 1px #00000008; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 21px; font-weight: 500; }
         .gg-repository-identity { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 2px 0; }
         .gg-repository-name { min-width: 0; overflow: hidden; color: var(--gg-text); font-size: 16px; line-height: 24px; font-weight: 680; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
         .gg-repository-arrow { flex: none; color: var(--gg-text-caption); font-size: 13px; }
-        .gg-repository-branch { min-width: 0; overflow: hidden; border-radius: 5px; padding: 2px 6px; color: var(--gg-accent); background: var(--gg-accent-soft); font-size: 13px; line-height: 20px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+        .gg-repository-branch { min-width: 0; overflow: hidden; border-radius: 5px; padding: 2px 6px; color: var(--gg-info-label); background: color-mix(in srgb, var(--gg-info) 10%, transparent); font-size: 13px; line-height: 20px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 
         .gg-btn {
-          min-height: 30px;
-          border-color: var(--gg-border-strong);
+          position: relative;
+          isolation: isolate;
+          min-height: 32px;
+          border: 0;
           border-radius: var(--gg-radius-control);
           padding: 5px 10px;
-          color: var(--gg-text-secondary);
-          background: var(--gg-surface);
+          color: var(--gg-text);
+          background: transparent;
           font-family: inherit;
           font-size: 12px;
           line-height: 18px;
-          font-weight: 550;
+          font-weight: 500;
           white-space: nowrap;
-          transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+          transition: color 120ms ease, opacity 120ms ease;
         }
-        .gg-btn:hover:not(:disabled) { border-color: var(--gg-border-strong); color: var(--gg-text); background: var(--dsw-alias-interactive-bg-hover, var(--gg-surface-raised)); }
-        .gg-btn:focus-visible { outline: none; box-shadow: var(--gg-focus); }
-        .gg-btn:active:not(:disabled) { transform: translateY(1px); }
+        /* Only the face contracts on press; text and the hit target stay still. */
+        .gg-btn::before {
+          content: ''; position: absolute; inset: 1px; z-index: -1; pointer-events: none;
+          border-radius: calc(var(--gg-radius-control) - 1px);
+          background: linear-gradient(var(--gg-button-top), var(--gg-button-bottom));
+          box-shadow: 0 0 0 1px var(--gg-border-strong), var(--gg-contact-shadow), inset 0 1px 0 var(--gg-edge);
+          transition: box-shadow 180ms var(--gg-ease), background 80ms ease;
+        }
+        .gg-btn:hover:not(:disabled)::before { background: var(--gg-surface-raised); box-shadow: 0 0 0 1px var(--gg-border-strong), var(--gg-panel-shadow), inset 0 1px 0 var(--gg-edge); }
+        .gg-btn:focus-visible { outline: 2px solid var(--gg-text-muted); outline-offset: 3px; }
+        .gg-btn:active:not(:disabled) { transform: none; }
+        .gg-btn:active:not(:disabled)::before { background: var(--gg-surface-inset); box-shadow: 0 0 0 0 var(--gg-border-strong), inset 0 0 0 1px var(--gg-border-strong), inset 0 1px 2px #00000014; transition-duration: 80ms; }
         .gg-btn:disabled { opacity: .42; }
-        .gg-btn.primary {
-          border-color: var(--dsw-alias-button-primary-fill, var(--gg-accent));
-          color: var(--dsw-alias-label-primary-foreground, #fff);
-          background: var(--dsw-alias-button-primary-fill, var(--gg-accent));
-        }
-        .gg-btn.primary:hover:not(:disabled) { border-color: var(--dsw-alias-button-primary-hover, var(--gg-accent-strong)); color: var(--dsw-alias-label-primary-foreground, #fff); background: var(--dsw-alias-button-primary-hover, var(--gg-accent-strong)); }
-        .gg-btn.danger { border-color: var(--gg-danger); color: var(--dsw-alias-label-primary-foreground, #fff); background: var(--gg-danger); }
-        .gg-btn.danger:hover:not(:disabled) { border-color: var(--gg-danger); color: var(--dsw-alias-label-primary-foreground, #fff); background: color-mix(in srgb, var(--gg-danger) 86%, var(--gg-text)); }
+        .gg-btn.primary { color: var(--gg-inverse); background: transparent; }
+        .gg-btn.primary::before { background: linear-gradient(color-mix(in srgb, var(--gg-primary) 87%, #fff), var(--gg-primary)); box-shadow: 0 0 0 1px var(--gg-primary), var(--gg-contact-shadow), inset 0 1px 0 #ffffff24; }
+        .gg-btn.primary:hover:not(:disabled)::before { background: var(--dsw-alias-button-primary-hover, var(--gg-primary)); box-shadow: 0 0 0 1px var(--gg-primary), var(--gg-panel-shadow), inset 0 1px 0 #ffffff24; }
+        .gg-btn.primary:active:not(:disabled)::before { background: var(--gg-primary); box-shadow: 0 0 0 0 var(--gg-primary), inset 0 0 0 1px var(--gg-primary), inset 0 1px 2px #00000024; }
+        .gg-btn.danger { color: var(--gg-danger-label); background: transparent; }
+        .gg-btn.danger::before { background: color-mix(in srgb, var(--gg-danger) 8%, var(--gg-surface)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--gg-danger) 48%, transparent), var(--gg-contact-shadow), inset 0 1px 0 var(--gg-edge); }
+        .gg-btn.danger:hover:not(:disabled)::before { background: color-mix(in srgb, var(--gg-danger) 14%, var(--gg-surface)); box-shadow: 0 0 0 1px var(--gg-danger), var(--gg-panel-shadow); }
+        .gg-btn.danger:active:not(:disabled)::before { background: color-mix(in srgb, var(--gg-danger) 10%, var(--gg-surface)); box-shadow: 0 0 0 0 var(--gg-danger), inset 0 0 0 1px var(--gg-danger), inset 0 1px 2px #00000014; }
+        .gg-btn[aria-busy="true"], .gg-btn[data-state="succeeded"] { opacity: 1; }
+        .gg-commit-buttons .gg-btn { min-width: 0; }
+        .gg-proposal-run { min-width: 120px; }
+        .gg-workbench-action.gg-btn { --gg-radius-control: 9px; display: inline-flex; height: 30px; min-height: 30px; align-items: center; gap: 7px; padding: 0 10px; font-size: 12px; line-height: 20px; }
+        .gg-git-icon { width: 15px; height: 15px; flex: none; }
+        .gg-workbench-action-badge { display: inline-flex; align-items: center; gap: 5px; margin-left: 1px; border-left: 1px solid var(--gg-border); padding-left: 8px; color: var(--gg-text-secondary); font-size: 11px; }
+        .gg-workbench-action-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gg-warning); }
+        .gg-workbench-close::before, .gg-toggle::before { background: transparent; box-shadow: none; }
         .gg-review-mode { min-height: 28px; padding: 4px 8px; font-size: 11.5px; }
-        .gg-review-mode.active { border-color: var(--gg-accent); color: var(--gg-accent-strong); background: var(--gg-accent-soft); }
+        .gg-review-mode.active { color: var(--gg-text); background: transparent; }
+        .gg-review-mode.active::before { background: var(--gg-surface-inset); box-shadow: inset 0 0 0 1px var(--gg-border-strong); }
 
         .gg-input, .gg-sync-row select, .gg-sync-actions > select {
           min-height: 34px;
-          border: 1px solid var(--gg-border-strong);
+          border: 1px solid var(--gg-border);
           border-radius: var(--gg-radius-control);
           padding: 6px 9px;
           color: var(--gg-text);
           background: var(--gg-surface-inset);
+          box-shadow: inset 0 1px 2px #00000008;
           font-family: inherit;
           font-size: 12px;
           line-height: 20px;
@@ -511,10 +537,11 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-input:hover:not(:disabled), .gg-sync-row select:hover:not(:disabled), .gg-sync-actions > select:hover:not(:disabled) { border-color: var(--gg-text-caption); }
         .gg-input:focus, .gg-sync-row select:focus, .gg-sync-actions > select:focus {
           outline: none;
-          border-color: var(--gg-accent);
-          box-shadow: var(--gg-focus);
-          background: var(--gg-bg);
+          border-color: var(--gg-border-strong);
+          box-shadow: var(--gg-focus), var(--gg-panel-shadow);
+          background: var(--gg-surface-raised);
         }
+        textarea.gg-input { min-height: 78px; resize: vertical; }
         .gg-field { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
         .gg-field-label { color: var(--gg-text-secondary); font-size: 11.5px; line-height: 17px; font-weight: 620; }
         .gg-field-help { color: var(--gg-text-subtle); font-size: 11px; line-height: 16px; }
@@ -548,9 +575,10 @@ interface SyncTabProps extends RepositoryTabProps {}
           border-color: var(--gg-border);
           border-radius: var(--gg-radius);
           background: var(--gg-surface);
+          box-shadow: var(--gg-contact-shadow), inset 0 1px 0 var(--gg-edge);
         }
         .gg-file-group, .gg-branch-list, .gg-commit-form, .gg-branch-form, .gg-sync-actions, .gg-diff { padding: 9px; }
-        .gg-file-group > strong, .gg-sync-card strong, .gg-sync-actions > strong { color: var(--gg-text-secondary); font-size: 13.5px; line-height: 21px; font-weight: 680; }
+        .gg-file-group > strong, .gg-sync-card strong, .gg-sync-actions > strong { color: var(--gg-text-secondary); font-size: 13px; line-height: 21px; font-weight: 500; }
         .gg-file-group > strong { display: flex; align-items: center; }
         .gg-folder-toggle { min-height: 30px; border-radius: 5px; color: var(--gg-text-secondary); }
         .gg-folder-toggle:hover { color: var(--gg-text); background: var(--dsw-alias-interactive-bg-hover, var(--gg-accent-soft)); }
@@ -561,9 +589,9 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-file-path code { color: inherit; font-size: 12.25px; line-height: 19px; }
         .gg-file.added code { color: var(--gg-success-label); }
         .gg-file.deleted code { color: var(--gg-danger-label); }
-        .gg-file.modified code { color: var(--gg-warning); }
+        .gg-file.modified code { color: var(--gg-warning-label); }
         .gg-branch-row.current { border-radius: 6px; padding-right: 6px; padding-left: 6px; background: var(--gg-accent-soft); }
-        .gg-branch-row.current > code:first-child { color: var(--gg-accent); font-size: 13px; font-weight: 700; }
+        .gg-branch-row.current > code:first-child { color: var(--gg-info-label); font-size: 13px; font-weight: 700; }
         .gg-reference-hash { color: var(--gg-text-caption); }
 
         .gg-sync-grid { gap: 8px; }
@@ -582,8 +610,8 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-review { line-height: 1.6; }
         .gg-review-number { color: var(--gg-text-caption); background: color-mix(in srgb, var(--gg-text) 3%, transparent); }
         .gg-review-code, .gg-diff-context { color: var(--gg-text-secondary); }
-        .gg-review-line.added, .gg-diff-added { color: var(--gg-success-label); background: color-mix(in srgb, var(--gg-success) 18%, transparent); }
-        .gg-review-line.deleted, .gg-diff-deleted { color: var(--gg-danger-label); background: color-mix(in srgb, var(--gg-danger) 18%, transparent); }
+        .gg-review-line.added, .gg-diff-added { color: var(--gg-success-label); background: color-mix(in srgb, var(--gg-success) 18%, transparent); box-shadow: inset 2px 0 var(--gg-success); }
+        .gg-review-line.deleted, .gg-diff-deleted { color: var(--gg-danger-label); background: color-mix(in srgb, var(--gg-danger) 18%, transparent); box-shadow: inset 2px 0 var(--gg-danger); }
         .gg-review-skip, .gg-diff-modified { color: var(--gg-warning-label); background: color-mix(in srgb, var(--gg-warning) 14%, transparent); }
         .gg-review-annotation, .gg-diff-meta { color: var(--gg-text-muted); background: color-mix(in srgb, var(--gg-text) 5%, transparent); }
 
@@ -598,8 +626,15 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-command-status.failed { color: var(--gg-danger-label); }
         .gg-command-code { color: var(--gg-text-secondary); }
 
-        .gg-head { color: var(--gg-text); font-size: 14px; line-height: 22px; font-weight: 680; }
-        .gg-stepcode { color: var(--gg-text-secondary); background: var(--gg-surface-raised); }
+        .gg-head { color: var(--gg-text); font-size: 13px; line-height: 22px; font-weight: 500; margin-bottom: 12px; flex-wrap: wrap; }
+        .gg-step { align-items: stretch; gap: 9px; border: 1px solid var(--gg-border); border-radius: 8px; padding: 9px 11px; background: var(--gg-surface-inset); box-shadow: inset 0 1px 2px #00000008; }
+        .gg-stepnum { align-self: baseline; padding-top: 2px; font: 11px/20px ui-monospace, monospace; color: var(--gg-text-muted); }
+        .gg-stepcode { min-width: 0; color: var(--gg-text-secondary); background: var(--gg-surface-inset); }
+        .gg-step > .gg-stepcode { flex: 1; padding: 0; border-radius: 0; background: transparent; line-height: 22px; }
+        .gg-dock-full > .gg-actions { margin-top: 14px; }
+        .gg-proposal-status { margin-left: auto; color: var(--gg-text-muted); font-size: 11px; font-weight: 400; }
+        .gg-proposal-result { padding: 9px 11px; border: 1px solid var(--gg-border); border-radius: 8px; background: var(--gg-surface-inset); }
+        .gg-out > pre { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
         .gg-failure-label { color: var(--gg-danger-label); }
         .gg-failure-value, .gg-diagnostics { color: var(--gg-text-secondary); }
         .gg-commit-row:hover, .gg-commit-row.active { background: var(--gg-accent-soft); }
@@ -613,15 +648,16 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-commit-file, .gg-stash-row { border-bottom-color: var(--dsw-alias-border-l1, var(--gg-border)); }
         .gg-commit-file.added, .gg-additions { color: var(--gg-success-label); }
         .gg-commit-file.deleted, .gg-deletions { color: var(--gg-danger-label); }
-        .gg-commit-file.modified { color: var(--gg-warning); }
-        .gg-stash-selector { color: var(--gg-accent); font-size: 12.5px; font-weight: 650; }
+        .gg-commit-file.modified { color: var(--gg-warning-label); }
+        .gg-stash-selector { color: var(--gg-tag); font-size: 12.5px; font-weight: 650; }
         .gg-stash-subject { color: var(--gg-text); font-size: 13px; line-height: 20px; font-weight: 580; }
-        .gg-ref.branch, .gg-ref.current { color: var(--gg-accent); background: var(--gg-accent-soft); }
+        .gg-ref.branch, .gg-ref.current { color: var(--gg-info-label); background: color-mix(in srgb, var(--gg-info) 10%, transparent); }
+        .gg-ref.current { background: color-mix(in srgb, var(--gg-info) 18%, transparent); }
         .gg-ref.remote { color: var(--gg-warning-label); background: color-mix(in srgb, var(--gg-warning) 12%, transparent); }
-        .gg-ref.tag { color: color-mix(in srgb, #9d5bd2 72%, var(--gg-text)); background: color-mix(in srgb, #9d5bd2 12%, transparent); }
+        .gg-ref.tag { color: var(--gg-tag); background: color-mix(in srgb, var(--gg-tag) 12%, transparent); }
 
-        .gg-dock-full { border-color: var(--gg-border, rgba(127, 127, 127, .35)); border-radius: var(--gg-radius, 8px); background: var(--gg-surface, rgba(127, 127, 127, .06)); }
-        .gg-workbench-action:active:not(:disabled) { transform: translateY(1px); }
+        .gg-dock-full { padding: 14px; border-color: var(--gg-border); border-radius: 12px; background: var(--gg-surface); box-shadow: var(--gg-panel-shadow), inset 0 1px 0 var(--gg-edge); }
+        .gg-badge.hard { border: 1px solid color-mix(in srgb, var(--gg-danger) 38%, transparent); font-weight: 650; }
 
         /* Container width, not viewport width, decides when the two-pane change view is safe. */
         .gg-change-layout { display: flex; }
@@ -646,7 +682,8 @@ interface SyncTabProps extends RepositoryTabProps {}
 
         @media (prefers-reduced-motion: reduce) {
           .gg-workbench *, .gg-workbench *::before, .gg-workbench *::after,
-          .gg-dock *, .gg-dock *::before, .gg-dock *::after {
+          .gg-dock *, .gg-dock *::before, .gg-dock *::after,
+          .gg-workbench-action, .gg-workbench-action::before {
             scroll-behavior: auto !important;
             transition-duration: .01ms !important;
             animation-duration: .01ms !important;
@@ -656,6 +693,29 @@ interface SyncTabProps extends RepositoryTabProps {}
       `
       document.head.appendChild(tag)
       return () => { try { tag.remove() } catch (e) { /* ignore */ } }
+    }
+
+    /*! Lucide git-branch icon. ISC License, Copyright (c) 2026 Lucide Icons and Contributors.
+     * Permission to use, copy, modify, and/or distribute this software for any purpose with
+     * or without fee is hereby granted, provided that the above copyright notice and this
+     * permission notice appear in all copies.
+     * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD
+     * TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.
+     * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR
+     * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR
+     * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+     * ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+     * Source: https://github.com/lucide-icons/lucide/blob/main/icons/git-branch.svg
+     */
+    function renderGitIcon() {
+      return React.createElement('svg', {
+        className: 'gg-git-icon', width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none',
+        stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
+      },
+      React.createElement('path', { d: 'M15 6a9 9 0 0 0-9 9V3' }),
+      React.createElement('circle', { cx: 18, cy: 6, r: 3 }),
+      React.createElement('circle', { cx: 6, cy: 18, r: 3 }),
+      )
     }
 
     function GitWorkbenchAction(props: GitWorkbenchActionProps) {
@@ -700,13 +760,16 @@ interface SyncTabProps extends RepositoryTabProps {}
       return React.createElement('button', {
         type: 'button',
         className: 'gg-btn gg-workbench-action',
-        title: error || '打开 Git 工作台',
-        'aria-label': error || 'Git 工作台',
+        title: error || (pending ? '打开 Git 工作台，有待确认的操作建议' : '打开 Git 工作台'),
+        'aria-label': error || (pending ? 'Git 工作台，有待确认的操作建议' : 'Git 工作台'),
         disabled: !sessionId,
         onClick: openWorkbench,
       },
+      renderGitIcon(),
       React.createElement('span', null, 'Git'),
-      pending ? React.createElement('span', { className: 'gg-workbench-action-dot', 'aria-hidden': true }) : null,
+      pending ? React.createElement('span', { className: 'gg-workbench-action-badge', 'aria-hidden': true },
+        React.createElement('span', { className: 'gg-workbench-action-dot' }), '待确认',
+      ) : null,
       )
     }
 
@@ -848,6 +911,8 @@ interface SyncTabProps extends RepositoryTabProps {}
       const [mutating, setBusy] = React.useState(false)
       const [generating, setGenerating] = React.useState(false)
       const [generationError, setGenerationError] = React.useState('')
+      const [commitState, setCommitState] = React.useState('idle' as RefreshState)
+      const [mutationError, setMutationError] = React.useState(null as { message: string; diagnostics: string } | null)
       const busy = mutating || generating
       const [message, setMessage] = React.useState('')
       const [diagnostics, setDiagnostics] = React.useState('')
@@ -866,6 +931,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         const request = beginTrackedRequest(generationRequestRef)
         setGenerating(true)
         setGenerationError('')
+        setCommitState('idle')
         try {
           const response = await rpc({ action: 'generate-commit-message', sessionId }, request.signal)
           if (!isTrackedRequestCurrent(generationRequestRef, request)) return
@@ -884,6 +950,8 @@ interface SyncTabProps extends RepositoryTabProps {}
       React.useEffect(() => {
         setGenerating(false)
         setGenerationError('')
+        setCommitState('idle')
+        setMutationError(null)
         return () => cancelTrackedRequest(generationRequestRef)
       }, [sessionId])
 
@@ -932,6 +1000,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         if (!manual && manualRefreshRef.current) return Promise.resolve(false)
         if (manual) {
           manualRefreshRef.current = true
+          setMutationError(null)
           refreshFeedback.begin()
         }
         const request = beginTrackedRequest(summaryRequestRef)
@@ -988,14 +1057,14 @@ interface SyncTabProps extends RepositoryTabProps {}
         const description = mutationCommand(action, payload)
         const completeCommand = description ? onCommand(description.label, description.command) : null
         setBusy(true)
+        setMutationError(null)
         setMessage('')
         setDiagnostics('')
         return rpcRepositoryMutation(action, sessionId, payload)
           .then((response) => {
             if (!response || response.ok !== true) {
               if (completeCommand) completeCommand(false)
-              setMessage(actionError(response))
-              setDiagnostics(actionDiagnostics(response))
+              setMutationError({ message: actionError(response), diagnostics: actionDiagnostics(response) })
               onFailure(response as AnyRecord)
               return false
             }
@@ -1008,7 +1077,7 @@ interface SyncTabProps extends RepositoryTabProps {}
               return true
             }
           })
-          .catch((error) => { if (completeCommand) completeCommand(false); setMessage(errorText(error)); setDiagnostics(''); return false })
+          .catch((error) => { if (completeCommand) completeCommand(false); setMutationError({ message: errorText(error), diagnostics: '' }); return false })
           .then((succeeded: boolean) => { setBusy(false); return succeeded })
       }
 
@@ -1081,6 +1150,8 @@ interface SyncTabProps extends RepositoryTabProps {}
         ),
         message ? React.createElement('div', { className: 'gg-workbench-error' }, message) : null,
         diagnostics ? React.createElement('pre', { className: 'gg-diagnostics' }, diagnostics) : null,
+        mutationError ? React.createElement('div', { className: 'gg-workbench-error', role: 'alert' }, mutationError.message) : null,
+        mutationError?.diagnostics ? React.createElement('pre', { className: 'gg-diagnostics' }, mutationError.diagnostics) : null,
         summary ? React.createElement('div', { className: 'gg-change-layout' },
           React.createElement('div', { className: 'gg-change-files' },
             React.createElement('div', { className: 'gg-file-group' },
@@ -1094,20 +1165,29 @@ interface SyncTabProps extends RepositoryTabProps {}
             React.createElement('div', { className: 'gg-commit-form' },
               React.createElement('label', { className: 'gg-field', htmlFor: 'gg-commit-message' },
                 React.createElement('span', { className: 'gg-field-label' }, '提交说明'),
-                React.createElement('input', {
+                React.createElement('textarea', {
                   id: 'gg-commit-message', className: 'gg-input', value: commitMessage, placeholder: '例如：fix: 修复登录状态', disabled: busy,
-                  onChange: (event: AnyRecord) => setCommitMessage(String(event.target.value || '')),
+                  rows: 3,
+                  onChange: (event: AnyRecord) => { setCommitMessage(String(event.target.value || '')); setCommitState('idle') },
                 }),
               ),
               React.createElement('div', { className: 'gg-commit-buttons' },
                 React.createElement('button', {
                   className: 'gg-btn', type: 'button', disabled: busy || hasConflicts || stagedFiles.length === 0,
+                  'aria-busy': generating,
                   onClick: generateMessage,
                 }, generating ? '生成中…' : 'AI 生成'),
                 React.createElement('button', {
-                  className: 'gg-btn primary', disabled: busy || hasConflicts || !commitMessage.trim() || stagedFiles.length === 0,
-                  onClick: () => runMutation('commit', { message: commitMessage }).then((succeeded: boolean) => { if (succeeded) setCommitMessage('') }),
-                }, '提交'),
+                  className: 'gg-btn primary', type: 'button', disabled: busy || hasConflicts || !commitMessage.trim() || stagedFiles.length === 0,
+                  'aria-busy': commitState === 'loading', 'aria-live': 'polite', 'data-state': commitState,
+                  onClick: () => {
+                    setCommitState('loading')
+                    return runMutation('commit', { message: commitMessage }).then((succeeded: boolean) => {
+                      setCommitState(succeeded ? 'succeeded' : 'failed')
+                      if (succeeded) setCommitMessage('')
+                    })
+                  },
+                }, commitState === 'loading' ? '提交中…' : commitState === 'succeeded' ? '已提交' : commitState === 'failed' ? '重新提交' : '提交'),
               ),
               generationError ? React.createElement('div', { className: 'gg-workbench-error', role: 'alert' }, generationError) : null,
             ),
@@ -1335,6 +1415,7 @@ interface SyncTabProps extends RepositoryTabProps {}
     }
 
     const COMMIT_GRAPH_COLORS = ['#ff7500', '#ffbf16', '#3ba7ff', '#c57cff', '#38d996', '#ff5c8a']
+      .map(color => `color-mix(in srgb, ${color} 72%, var(--gg-text))`)
 
     function CommitGraph(props: { row: CommitGraphRow }) {
       const { row } = props
@@ -2172,8 +2253,13 @@ interface SyncTabProps extends RepositoryTabProps {}
       const isCopied = proposal.copied === true
       const isPending = !proposal.status || proposal.status === 'pending'
       const locallyFailed = outcome?.ok === false
-      const canRun = isPending && !locallyFailed && !busy && (!isHard || understood)
-      const canCopy = isPending && !locallyFailed && !busy && (!isHard || understood)
+      const locallySucceeded = outcome?.ok === true
+      const canRun = isPending && !locallyFailed && !locallySucceeded && !busy && (!isHard || understood)
+      const canCopy = isPending && !locallyFailed && !locallySucceeded && !busy && (!isHard || understood)
+      const proposalStatus = ranInfo || locallySucceeded || ['succeeded', 'verified'].includes(proposal.status) ? '已完成'
+        : busy || proposal.status === 'running' ? '执行中'
+        : locallyFailed || proposal.status === 'failed' ? '执行失败'
+        : isCopied ? '待验证' : '待确认'
 
       const onRun = () => {
         if (!canRun) return
@@ -2246,14 +2332,16 @@ interface SyncTabProps extends RepositoryTabProps {}
       const badgeCls = isHard ? 'gg-badge hard' : proposal.risk === 'safe' ? 'gg-badge safe' : 'gg-badge normal'
 
       const renderSteps = () => steps.map((s: AnyRecord, i: number) => React.createElement('div', { className: 'gg-step', key: 'step' + i },
-        React.createElement('span', { className: 'gg-stepnum' }, String(i + 1) + '.'),
+        React.createElement('span', { className: 'gg-stepnum' }, String(i + 1).padStart(2, '0')),
         React.createElement('code', { className: 'gg-stepcode' }, String(s.command)),
       ))
 
       const headerEl = React.createElement('div', { className: 'gg-head', key: 'head' },
+        renderGitIcon(),
         React.createElement('span', null, 'Git 操作建议'),
         React.createElement('span', { className: badgeCls }, riskLabel),
-        React.createElement('button', { className: 'gg-btn gg-toggle', onClick: () => setCollapsed(!collapsed), title: collapsed ? '展开' : '收缩' },
+        React.createElement('span', { className: 'gg-proposal-status', role: 'status', 'aria-live': 'polite' }, proposalStatus),
+        React.createElement('button', { className: 'gg-btn gg-toggle', type: 'button', 'aria-expanded': !collapsed, 'aria-label': collapsed ? '展开操作建议' : '收起操作建议', onClick: () => setCollapsed(!collapsed), title: collapsed ? '展开' : '收缩' },
           collapsed ? '▸' : '▾',
         ),
       )
@@ -2272,7 +2360,7 @@ interface SyncTabProps extends RepositoryTabProps {}
       }
 
       if (ranInfo) {
-        lines.push(React.createElement('div', { className: 'gg-ok gg-ran', key: 'ran' }, '✔ 检测到预期结果已达成（已执行），即将关闭此建议'))
+        lines.push(React.createElement('div', { className: 'gg-ok gg-ran gg-proposal-result', key: 'ran', role: 'status' }, '✔ 检测到预期结果已达成（已执行），即将关闭此建议'))
         lines.push(React.createElement('pre', { className: 'gg-pre', key: 'ranstate' }, String(ranInfo)))
         return React.createElement('div', { className: 'gg-dock gg-dock-full' }, lines)
       }
@@ -2306,7 +2394,8 @@ interface SyncTabProps extends RepositoryTabProps {}
             React.createElement('button', { className: 'gg-btn', onClick: () => doDismiss(proposal.proposalId) }, '关闭失败提议'),
           ))
         }
-      } else if (isPending) {
+      }
+      if (isPending || proposal.status === 'running') {
         if (isHard) {
           lines.push(React.createElement('div', { className: 'gg-riskline', key: 'risk' }, '⚠ ' + ((proposal.reasons && proposal.reasons.length) ? proposal.reasons.join('；') : '该操作风险较高，可能造成不可逆的改动')))
           lines.push(React.createElement('label', { className: 'gg-check', key: 'ck' },
@@ -2315,8 +2404,8 @@ interface SyncTabProps extends RepositoryTabProps {}
           ))
         }
         const actions = []
-        actions.push(React.createElement('button', { key: 'run', className: 'gg-btn ' + (isHard ? 'danger' : 'primary'), disabled: !canRun, onClick: onRun },
-          busy ? '执行中…' : (isHard ? '确认并直接执行' : '直接执行')))
+        actions.push(React.createElement('button', { key: 'run', className: 'gg-btn gg-proposal-run ' + (isHard ? 'danger' : 'primary'), disabled: !canRun, 'aria-busy': busy || proposal.status === 'running', 'data-state': locallySucceeded ? 'succeeded' : undefined, onClick: onRun },
+          busy || proposal.status === 'running' ? '执行中…' : locallySucceeded ? '已执行' : (isHard ? '确认并直接执行' : '直接执行')))
         actions.push(React.createElement('button', { key: 'copy', className: 'gg-btn', disabled: !canCopy, onClick: onCopy }, '复制命令（手动执行）'))
         lines.push(React.createElement('div', { className: 'gg-actions', key: 'actions' }, actions))
       }
@@ -2328,7 +2417,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         if (outcome.stdout) oLines.push(String(outcome.stdout))
         if (outcome.stderr) oLines.push(String(outcome.stderr))
         const text = oLines.join('\n').trim() || '（无输出）'
-        lines.push(React.createElement('div', { className: 'gg-out', key: 'out' },
+        lines.push(React.createElement('div', { className: 'gg-out gg-proposal-result', key: 'out', role: 'status', 'aria-live': 'polite' },
           React.createElement('div', { className: ok ? 'gg-ok' : 'gg-fail' }, ok ? '✔ 执行成功' : '✘ 执行失败'),
           React.createElement('pre', null, text),
         ))
@@ -2386,6 +2475,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
+        GitDock,
         GitWorkbenchPanel,
         GitChangesTab,
         GitCommitActions,

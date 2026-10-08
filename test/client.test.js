@@ -147,6 +147,28 @@ test('文件审阅在纯删除块之后正确计算省略的未修改行', () =>
   assert.deepStrictEqual(rows[2], { kind: 'skipped', oldNumber: null, newNumber: null, text: '9 行未修改内容（由 Git 省略）' })
 })
 
+test('多文件审阅区分文件边界，不把文件头当代码，并独立计算省略行', () => {
+  const rows = loadClientPlugin().__testing.parseReviewRows([
+    'diff --git a/old.txt b/old.txt', '--- a/old.txt', '+++ b/old.txt',
+    '@@ -1 +1 @@', '--- source-code', '+++ source-code',
+    'diff --git a/new.txt b/new.txt', 'new file mode 100644', '--- /dev/null', '+++ b/new.txt',
+    '@@ -0,0 +1 @@', '+new file',
+    'diff --git a/last.txt b/last.txt', '--- a/last.txt', '+++ b/last.txt',
+    '@@ -10 +10 @@', '-before', '+after',
+  ].join('\n'))
+  assert.deepEqual(rows.filter(row => row.kind === 'annotation').map(row => row.text), [
+    'a/old.txt b/old.txt', 'a/new.txt b/new.txt', 'a/last.txt b/last.txt',
+  ])
+  assert.deepEqual(rows.filter(row => row.kind === 'added' || row.kind === 'deleted'), [
+    { kind: 'deleted', oldNumber: 1, newNumber: null, text: '-- source-code' },
+    { kind: 'added', oldNumber: null, newNumber: 1, text: '++ source-code' },
+    { kind: 'added', oldNumber: null, newNumber: 1, text: 'new file' },
+    { kind: 'deleted', oldNumber: 10, newNumber: null, text: 'before' },
+    { kind: 'added', oldNumber: null, newNumber: 10, text: 'after' },
+  ])
+  assert.deepEqual(rows.filter(row => row.kind === 'skipped').map(row => row.text), ['9 行未修改内容（由 Git 省略）'])
+})
+
 test('Diff 的审阅与原始视图共享完整滚动宽度', () => {
   const clientPlugin = loadClientPlugin()
   const raw = clientPlugin.__testing.renderRawDiffSurface([
@@ -181,7 +203,7 @@ test('Diff 的审阅与原始视图共享完整滚动宽度', () => {
   assert.match(styleTag.textContent, /\.gg-diff-code span \{[^}]*width: 100%;/)
 })
 
-test('Git 工作台入口使用 DSH 风格的无边框悬停反馈', () => {
+test('Git 工作台保留官方黑白背景和按钮，内容状态保留语义色，按压不移动文字', () => {
   const clientPlugin = loadClientPlugin()
   let styleTag
   global.document = {
@@ -195,9 +217,14 @@ test('Git 工作台入口使用 DSH 风格的无边框悬停反馈', () => {
     delete global.document
   }
 
-  assert.match(styleTag.textContent, /\.gg-workbench-action \{[^}]*height: 28px;[^}]*border: 0;[^}]*background: transparent;/)
-  assert.match(styleTag.textContent, /\.gg-workbench-action:hover:not\(:disabled\) \{[^}]*box-shadow: var\(--dsw-shadow-lv1/)
-  assert.match(styleTag.textContent, /\.gg-workbench-action\[aria-pressed="true"\] \{[^}]*border: 0;[^}]*button-ghost-active-fill/)
+  assert.match(styleTag.textContent, /\.gg-workbench, \.gg-dock, \.gg-workbench-action \{[^}]*--gg-accent: var\(--dsw-alias-brand-primary/)
+  assert.match(styleTag.textContent, /--gg-bg: var\(--dsw-alias-bg-base/)
+  assert.match(styleTag.textContent, /--gg-primary: var\(--dsw-alias-button-primary-fill/)
+  assert.match(styleTag.textContent, /--gg-success: var\(--dsw-alias-state-success-primary/)
+  assert.match(styleTag.textContent, /--gg-warning: var\(--dsw-alias-state-warn-primary/)
+  assert.match(styleTag.textContent, /--gg-danger: var\(--dsw-alias-state-error-primary/)
+  assert.match(styleTag.textContent, /\.gg-btn:active:not\(:disabled\) \{ transform: none;/)
+  assert.match(styleTag.textContent, /\.gg-btn::before \{[^}]*pointer-events: none;/)
 })
 
 test('工作台标题线、命令日志高度和变更页双栏边界使用修正后的布局', () => {
@@ -665,6 +692,70 @@ test('AI 生成与提交并排；生成中禁用、成功回填、失败保留�
     await ui.render()
     assert.notEqual(input().value, 'fix: 过期结果')
     assert.equal(ui.button('AI 生成').args[1].disabled, false)
+  } finally { ui.cleanup() }
+})
+
+test('提交反馈跟随真实结果，失败保留多行说明，成功后才清空并显示已提交', async t => {
+  let resolveCommit, pollSummary
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    const request = JSON.parse(options.body)
+    if (request.action === 'commit') return new Promise(resolve => { resolveCommit = body => resolve({ json: async () => body }) })
+    return { json: async () => ({ ok: true, data: { files: [{ path: 'a.txt', indexStatus: 'M', workTreeStatus: ' ' }], branch: 'main' } }) }
+  })
+  const ui = stashHarness(() => {}, 'GitChangesTab')
+  ui.props.onFailure = () => {}
+  ui.props.intervalFn = callback => { pollSummary = callback; return () => {} }
+  const field = () => ui.nodes().find(node => node.args[1]?.id === 'gg-commit-message')
+  try {
+    await ui.render(); await ui.render()
+    assert.equal(field().args[0], 'textarea')
+    field().args[1].onChange({ target: { value: '标题\n\n说明' } }); await ui.render()
+    const failed = ui.button('提交').args[1].onClick(); await ui.render()
+    assert.equal(ui.button('提交中…').args[1]['aria-busy'], true)
+    assert.equal(ui.button('提交中…').args[1].disabled, true)
+    resolveCommit({ ok: false, message: '提交失败', diagnostics: 'pre-commit hook rejected' }); await failed; await ui.render()
+    assert.equal(field().args[1].value, '标题\n\n说明')
+    assert.equal(ui.button('重新提交').args[1].disabled, false)
+    await pollSummary(); await ui.render()
+    assert.ok(ui.nodes().some(node => node.args[1]?.className === 'gg-workbench-error' && node.args[2] === '提交失败'), '自动刷新仓库不得清除提交失败原因')
+    assert.ok(ui.nodes().some(node => node.args[1]?.className === 'gg-diagnostics' && node.args[2] === 'pre-commit hook rejected'))
+    const success = ui.button('重新提交').args[1].onClick()
+    resolveCommit({ ok: true, data: { files: [], branch: 'main' } }); await success; await ui.render()
+    assert.equal(field().args[1].value, '')
+    assert.equal(ui.button('已提交').args[1]['data-state'], 'succeeded')
+    assert.equal(ui.button('已提交').args[1].disabled, true)
+    assert.ok(!ui.nodes().some(node => node.args[1]?.className === 'gg-workbench-error'))
+  } finally { ui.cleanup() }
+})
+
+test('建议状态保留风险确认，成功反馈显示后不能在轮询前重复执行', async t => {
+  let resolveExecution, executions = 0
+  const proposal = { proposalId: 'ui-feedback', status: 'pending', risk: 'hard', command: 'git reset --hard HEAD', steps: [], copied: false }
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    const request = JSON.parse(options.body)
+    if (request.action === 'execute') {
+      executions++
+      assert.equal(request.confirm, true)
+      return new Promise(resolve => { resolveExecution = body => resolve({ json: async () => body }) })
+    }
+    return { json: async () => ({ ok: true, proposal }) }
+  })
+  const ui = stashHarness(() => {}, 'GitDock')
+  ui.props.timeoutFn = () => () => {}
+  ui.props.onFailure = () => {}
+  try {
+    await ui.render(); await ui.render()
+    assert.equal(ui.button('确认并直接执行').args[1].disabled, true)
+    ui.nodes().find(node => node.args[1]?.type === 'checkbox').args[1].onChange({ target: { checked: true } })
+    await ui.render()
+    ui.button('确认并直接执行').args[1].onClick(); await ui.render()
+    assert.equal(ui.button('执行中…').args[1]['aria-busy'], true)
+    assert.equal(ui.button('复制命令（手动执行）').args[1].disabled, true)
+    resolveExecution({ ok: true, stdout: 'done' }); await ui.render(); await ui.render()
+    assert.equal(ui.button('已执行').args[1].disabled, true)
+    assert.ok(ui.nodes().some(node => node.args[1]?.className === 'gg-proposal-status' && node.args[2] === '已完成'))
+    ui.button('已执行').args[1].onClick(); await ui.render()
+    assert.equal(executions, 1)
   } finally { ui.cleanup() }
 })
 

@@ -13,6 +13,13 @@ interface GitWorkbenchPanelProps {
     intervalFn?: TimerFn | null;
     timeoutFn?: TimerFn | null;
 }
+interface GitDockProps {
+    sessionId?: unknown;
+    onFailure: FailureHandler;
+    onCommand?: CommandReporter;
+    intervalFn?: TimerFn | null;
+    timeoutFn?: TimerFn | null;
+}
 interface RepositoryTabProps {
     onConflicts(): void;
     sessionId: string;
@@ -31,10 +38,12 @@ declare function renderRawDiffSurface(diff: string): any;
 declare function renderReviewSurface(diff: string): any;
 declare function GitChangesTab(props: RepositoryTabProps): any;
 declare function GitWorkbenchPanel(props: GitWorkbenchPanelProps): any;
+declare function GitDock(props: GitDockProps): any;
 declare const plugin: {
     inject: string[];
     apply(ctx: AnyRecord): void;
     __testing: {
+        GitDock: typeof GitDock;
         GitWorkbenchPanel: typeof GitWorkbenchPanel;
         GitChangesTab: typeof GitChangesTab;
         GitCommitActions: typeof GitCommitActions;

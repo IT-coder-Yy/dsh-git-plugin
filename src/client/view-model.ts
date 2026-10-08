@@ -282,12 +282,20 @@ export function buildFileTree(files: RepositoryFile[]): FileTreeNode {
 
 export function parseReviewRows(diff: string): ReviewRow[] {
   const rows: ReviewRow[] = []
+  const multipleFiles = (diff.match(/^diff --git /gm) || []).length > 1
   let inHunk = false
   let oldLine = 0
   let newLine = 0
   let previousOldNext = 1
   let previousNewNext = 1
   for (const line of diff.split(/\r?\n/)) {
+    if (line.startsWith('diff --git ')) {
+      inHunk = false
+      previousOldNext = 1
+      previousNewNext = 1
+      if (multipleFiles) rows.push({ kind: 'annotation', oldNumber: null, newNumber: null, text: line.slice('diff --git '.length) })
+      continue
+    }
     const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line)
     if (hunk) {
       const oldStart = Number(hunk[1])
