@@ -47,6 +47,8 @@ export interface ReviewRow {
   text: string
 }
 
+export type ReviewBlock = ReviewRow | { kind: 'hunk'; rows: ReviewRow[] }
+
 export interface CommitGraphEdge {
   from: number
   to: number | null
@@ -281,7 +283,12 @@ export function buildFileTree(files: RepositoryFile[]): FileTreeNode {
 }
 
 export function parseReviewRows(diff: string): ReviewRow[] {
-  const rows: ReviewRow[] = []
+  return parseReviewBlocks(diff).flatMap(block => block.kind === 'hunk' ? block.rows : [block])
+}
+
+export function parseReviewBlocks(diff: string): ReviewBlock[] {
+  const blocks: ReviewBlock[] = []
+  let rows: ReviewRow[] = []
   const multipleFiles = (diff.match(/^diff --git /gm) || []).length > 1
   let inHunk = false
   let oldLine = 0
@@ -293,7 +300,7 @@ export function parseReviewRows(diff: string): ReviewRow[] {
       inHunk = false
       previousOldNext = 1
       previousNewNext = 1
-      if (multipleFiles) rows.push({ kind: 'annotation', oldNumber: null, newNumber: null, text: line.slice('diff --git '.length) })
+      if (multipleFiles) blocks.push({ kind: 'annotation', oldNumber: null, newNumber: null, text: line.slice('diff --git '.length) })
       continue
     }
     const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line)
@@ -301,7 +308,9 @@ export function parseReviewRows(diff: string): ReviewRow[] {
       const oldStart = Number(hunk[1])
       const newStart = Number(hunk[3])
       const skipped = Math.max(oldStart - previousOldNext, newStart - previousNewNext)
-      if (skipped > 0) rows.push({ kind: 'skipped', oldNumber: null, newNumber: null, text: skipped + ' 行未修改内容（由 Git 省略）' })
+      if (skipped > 0) blocks.push({ kind: 'skipped', oldNumber: null, newNumber: null, text: skipped + ' 行未修改内容（由 Git 省略）' })
+      rows = []
+      blocks.push({ kind: 'hunk', rows })
       oldLine = oldStart
       newLine = newStart
       inHunk = true
@@ -334,7 +343,7 @@ export function parseReviewRows(diff: string): ReviewRow[] {
       previousNewNext = newLine
     }
   }
-  return rows
+  return blocks
 }
 
 export function diffLineClass(line: string): string {

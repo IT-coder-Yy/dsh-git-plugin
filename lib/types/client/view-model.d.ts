@@ -27,6 +27,10 @@ export interface ReviewRow {
     newNumber: number | null;
     text: string;
 }
+export type ReviewBlock = ReviewRow | {
+    kind: 'hunk';
+    rows: ReviewRow[];
+};
 export interface CommitGraphEdge {
     from: number;
     to: number | null;
@@ -73,4 +77,5 @@ export declare function pendingProposalTransition(previousProposalId: string | n
 export declare function openRecoveryProposal(response: unknown, open: () => void, schedule?: (callback: () => void, delayMs: number) => unknown): boolean;
 export declare function buildFileTree(files: RepositoryFile[]): FileTreeNode;
 export declare function parseReviewRows(diff: string): ReviewRow[];
+export declare function parseReviewBlocks(diff: string): ReviewBlock[];
 export declare function diffLineClass(line: string): string;

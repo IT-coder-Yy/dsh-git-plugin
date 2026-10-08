@@ -169,7 +169,7 @@ test('多文件审阅区分文件边界，不把文件头当代码，并独立�
   assert.deepEqual(rows.filter(row => row.kind === 'skipped').map(row => row.text), ['9 行未修改内容（由 Git 省略）'])
 })
 
-test('Diff 的审阅与原始视图共享完整滚动宽度', () => {
+test('Diff 的每个审阅块与原始视图保留完整内容宽度', () => {
   const clientPlugin = loadClientPlugin()
   const raw = clientPlugin.__testing.renderRawDiffSurface([
     '@@ -1,2 +1,2 @@',
@@ -185,7 +185,10 @@ test('Diff 的审阅与原始视图共享完整滚动宽度', () => {
   assert.strictEqual(raw.args[0], 'code')
   assert.strictEqual(raw.args[1].className, 'gg-diff-content')
   assert.strictEqual(review.args[0], 'div')
-  assert.strictEqual(review.args[1].className, 'gg-review-content')
+  assert.strictEqual(review.args[1].className, 'gg-review-blocks')
+  const hunk = review.args[2][0]
+  assert.strictEqual(hunk.args[1].className, 'gg-review-hunk')
+  assert.strictEqual(hunk.args[2].args[1].className, 'gg-review-content')
 
   let styleTag
   global.document = {
@@ -199,8 +202,36 @@ test('Diff 的审阅与原始视图共享完整滚动宽度', () => {
     delete global.document
   }
   assert.match(styleTag.textContent, /\.gg-review-content, \.gg-diff-content \{[^}]*width: max-content;[^}]*min-width: 100%; \}/)
+  assert.match(styleTag.textContent, /\.gg-review-hunk \{[^}]*max-width: 100%;[^}]*overflow-x: auto;/)
   assert.match(styleTag.textContent, /\.gg-review-line \{[^}]*width: 100%;/)
   assert.match(styleTag.textContent, /\.gg-diff-code span \{[^}]*width: 100%;/)
+})
+
+test('审阅按真实差异块独立滚动，块间提示与文件名不进入代码滚动区', () => {
+  const surface = loadClientPlugin().__testing.renderReviewSurface([
+    'diff --git a/one.txt b/one.txt',
+    '@@ -1 +1 @@', '-old', '+first replacement',
+    '\\ No newline at end of file',
+    '@@ -2 +2 @@', '-next', '+second replacement',
+    '@@ -10 +10 @@', '-later', '+third replacement',
+    'diff --git a/two.txt b/two.txt',
+    '@@ -0,0 +1 @@', '+new file',
+  ].join('\n'))
+  const blocks = surface.args[2]
+  assert.deepEqual(blocks.map(block => block.args[1].className), [
+    'gg-review-annotation', 'gg-review-hunk', 'gg-review-hunk',
+    'gg-review-skip', 'gg-review-hunk', 'gg-review-annotation', 'gg-review-hunk',
+  ])
+  const hunks = blocks.filter(block => block.args[1].className === 'gg-review-hunk')
+  const rows = hunks.map(hunk => hunk.args[2].args[2])
+  assert.deepEqual(rows.map(lines => lines.filter(line => line.args[1].className === 'gg-review-line added')
+    .map(line => [line.args[3].args[2], line.args[4].args[2]])), [
+    [['1', 'first replacement']], [['2', 'second replacement']],
+    [['10', 'third replacement']], [['1', 'new file']],
+  ])
+  assert.equal(rows[0][2].args[1].className, 'gg-review-annotation')
+  assert.equal(rows[0][2].args[2], 'No newline at end of file')
+  assert.equal(blocks[3].args[2], '⌄ 7 行未修改内容（由 Git 省略）')
 })
 
 test('Git 工作台保留官方黑白背景和按钮，内容状态保留语义色，按压不移动文字', () => {

@@ -34,6 +34,7 @@ import {
   mutationCommand,
   nextCommitSelection,
   openRecoveryProposal,
+  parseReviewBlocks,
   parseReviewRows,
   pendingProposalTransition,
   recoveryProposalId,
@@ -45,6 +46,7 @@ import {
   type FileTreeNode,
   type RepositoryMutationAction,
   type RequestSlot,
+  type ReviewRow,
 } from './view-model'
 import type {
   ActionResult,
@@ -320,7 +322,10 @@ interface SyncTabProps extends RepositoryTabProps {}
         .gg-review-toolbar { display: flex; gap: 5px; align-items: center; margin-bottom: 6px; }
         .gg-review-mode { padding: 3px 6px; font-size: 11px; }
         .gg-review-mode.active { border-color: #00c58b; color: #53f1bc; background: rgba(0,197,139,.12); }
-        .gg-review { min-height: 180px; overflow: auto; border-radius: 3px; background: #181a1b; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.55; }
+        .gg-review { min-width: 0; min-height: 180px; overflow: auto; border-radius: 3px; background: #181a1b; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.55; }
+        .gg-review-blocks { min-width: 0; width: 100%; }
+        .gg-review-hunk { max-width: 100%; overflow-x: auto; }
+        .gg-review-blocks > .gg-review-annotation, .gg-review-blocks > .gg-review-skip { overflow-wrap: anywhere; }
         .gg-review-content, .gg-diff-content { display: block; box-sizing: border-box; width: max-content; min-width: 100%; }
         .gg-review-line { display: grid; box-sizing: border-box; width: 100%; grid-template-columns: 38px 38px minmax(0, 1fr); }
         .gg-review-number { padding: 0 5px; color: #97a2aa; background: rgba(127,127,127,.09); text-align: right; user-select: none; }
@@ -858,9 +863,9 @@ interface SyncTabProps extends RepositoryTabProps {}
     }
 
     function renderReview(diff: string) {
-      const rows = parseReviewRows(diff)
-      if (!rows.length) return React.createElement('div', { className: 'gg-idletext' }, diff ? '没有可审阅的代码行。' : '没有可显示的差异。')
-      return rows.map((row, index) => {
+      const blocks = parseReviewBlocks(diff)
+      if (!blocks.length) return React.createElement('div', { className: 'gg-idletext' }, diff ? '没有可审阅的代码行。' : '没有可显示的差异。')
+      const renderRow = (row: ReviewRow, index: number) => {
         if (row.kind === 'skipped') return React.createElement('div', { className: 'gg-review-skip', key: 'review-' + index }, '⌄ ' + row.text)
         if (row.kind === 'annotation') return React.createElement('div', { className: 'gg-review-annotation', key: 'review-' + index }, row.text)
         return React.createElement('div', { className: 'gg-review-line ' + row.kind, key: 'review-' + index },
@@ -868,7 +873,12 @@ interface SyncTabProps extends RepositoryTabProps {}
           React.createElement('span', { className: 'gg-review-number' }, row.newNumber === null ? '' : String(row.newNumber)),
           React.createElement('code', { className: 'gg-review-code' }, row.text || ' '),
         )
-      })
+      }
+      return blocks.map((block, index) => block.kind === 'hunk'
+        ? React.createElement('div', { className: 'gg-review-hunk', key: 'hunk-' + index, tabIndex: 0, role: 'region', 'aria-label': '代码改动块' },
+          React.createElement('div', { className: 'gg-review-content' }, block.rows.map(renderRow)),
+        )
+        : renderRow(block, index))
     }
 
     function renderRawDiffSurface(diff: string) {
@@ -876,7 +886,7 @@ interface SyncTabProps extends RepositoryTabProps {}
     }
 
     function renderReviewSurface(diff: string) {
-      return React.createElement('div', { className: 'gg-review-content' }, renderReview(diff))
+      return React.createElement('div', { className: 'gg-review-blocks' }, renderReview(diff))
     }
 
     function renderRepositoryIdentity(topLevel: unknown, branch: unknown) {
