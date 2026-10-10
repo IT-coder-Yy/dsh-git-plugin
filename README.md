@@ -41,11 +41,11 @@ For more involved workflows, chat with the independent Git assistant in **建议
 
 ## Quick start
 
-Requires Git, Node.js `^22.19.0 || >=24.0.0`, and DeepSeek Harness Web. The commands below use a verified published combination; see [compatibility](#compatibility) for the current source's multi-version support.
+Requires Git, Node.js `^22.19.0 || >=24.0.0`, and DeepSeek Harness Web.
 
 ```sh
-npm install -g @deepseek-ai/dsh@0.2.0-rc.1
-dsh plugin --profile web add dsh-easygit-plugin@0.4.0
+npm install -g @deepseek-ai/dsh@0.2.0-rc.2
+dsh plugin --profile web add dsh-easygit-plugin@0.4.3
 dsh web
 ```
 

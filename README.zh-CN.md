@@ -41,11 +41,11 @@
 
 ## 快速开始
 
-需要 Git、Node.js `^22.19.0 || >=24.0.0` 和 DeepSeek Harness Web。以下是已验证的已发布组合；当前源码的多版本支持范围见[兼容性](#兼容性)。
+需要 Git、Node.js `^22.19.0 || >=24.0.0` 和 DeepSeek Harness Web。
 
 ```sh
-npm install -g @deepseek-ai/dsh@0.2.0-rc.1
-dsh plugin --profile web add dsh-easygit-plugin@0.4.0
+npm install -g @deepseek-ai/dsh@0.2.0-rc.2
+dsh plugin --profile web add dsh-easygit-plugin@0.4.3
 dsh web
 ```
 
