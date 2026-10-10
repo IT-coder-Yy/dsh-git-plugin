@@ -16,6 +16,7 @@ export interface StoredProposal {
     reasons: string[];
     confirmed: boolean;
     workdir: string;
+    sessionWorkdir?: string;
     createdAt: number;
     status: ProposalStatus;
     closed: boolean;

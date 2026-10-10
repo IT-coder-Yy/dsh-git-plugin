@@ -2,6 +2,8 @@ import { GitConflictsTab } from './conflict-tab';
 import { GitStashesTab } from './stash-tab';
 import { GitMergeTab } from './merge-tab';
 import { GitCommitActions } from './commit-actions';
+import { openSideChat } from './side-chat';
+import { rpc } from './rpc';
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model';
 import { registerWorkbench, type Dispose } from './panel-controller';
 import { appendCommandLog, analysisProposalId, beginTrackedRequest, buildAgentRepairPrompt, canDismissFailedProposal, buildFileTree, cancelTrackedRequest, commitFileTone, deriveCommitGraph, filterLocalBranches, failureContext, isCurrentCommitRequest, isLatestRequest, isTrackedRequestCurrent, mutationCommand, nextCommitSelection, openRecoveryProposal, parseReviewRows, pendingProposalTransition, recoveryProposalId, repositoryName, shouldShowAnalysisBanner, type AnyRecord } from './view-model';
@@ -43,6 +45,8 @@ declare const plugin: {
     inject: string[];
     apply(ctx: AnyRecord): void;
     __testing: {
+        rpc: typeof rpc;
+        openSideChat: typeof openSideChat;
         GitDock: typeof GitDock;
         GitWorkbenchPanel: typeof GitWorkbenchPanel;
         GitChangesTab: typeof GitChangesTab;

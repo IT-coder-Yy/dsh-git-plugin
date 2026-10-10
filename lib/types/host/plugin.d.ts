@@ -88,7 +88,7 @@ declare function recoverFailedCommand(activeShell: ShellService | null | undefin
     };
 } | null>;
 /** Register a recovery command as a pending proposal in the same session. */
-declare function registerRecoveryProposal(failedProposal: Pick<StoredProposal, 'sessionId' | 'workdir'>, recovery: RecoverySuggestion, failure?: GitFailureContext): StoredProposal | null;
+declare function registerRecoveryProposal(failedProposal: Pick<StoredProposal, 'sessionId' | 'workdir' | 'sessionWorkdir'>, recovery: RecoverySuggestion, failure?: GitFailureContext): StoredProposal | null;
 declare function storeProposal(sessionId: string, proposal: StoredProposal): StoredProposal;
 declare function findProposal(sessionId: string, proposalId: unknown): StoredProposal | undefined;
 declare function proposalView(proposal: StoredProposal): ProposalView;

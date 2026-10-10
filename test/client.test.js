@@ -26,6 +26,27 @@ function loadClientPlugin(reactOverrides = {}) {
   return clientPlugin
 }
 
+test('工作台与 Git 助手请求保留部署路径前缀和取消信号', async () => {
+  const { rpc, openSideChat } = loadClientPlugin().__testing
+  const previous = global.fetch
+  try {
+    for (const base of ['https://example.test/', 'https://example.test/harness/']) {
+      const requests = []
+      global.fetch = async (url, init) => {
+        requests.push({ url: new URL(url, base), ...init })
+        return { json: async () => ({ ok: true, sessionId: 'child' }) }
+      }
+      const signal = new AbortController().signal
+      await rpc({ action: 'state', sessionId: 'main' }, signal)
+      assert.strictEqual(await openSideChat('main'), 'child')
+      assert.strictEqual(requests[0].signal, signal)
+      assert.deepStrictEqual(requests.map(request => request.url.href), [base + 'easygit', base + 'easygit'])
+      assert.deepStrictEqual(requests.map(request => JSON.parse(request.body).action), ['state', 'side-chat'])
+      assert.ok(requests.every(request => request.method === 'POST' && request.headers['Content-Type'] === 'application/json'))
+    }
+  } finally { global.fetch = previous }
+})
+
 test('Client 注册原生右栏标签、工具栏入口并将分析隔离到侧会话', async (t) => {
   const clientPlugin = loadClientPlugin()
   assert.deepStrictEqual(clientPlugin.inject, ['slots', 'timer', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'conversation'])

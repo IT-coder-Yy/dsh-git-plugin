@@ -45,6 +45,44 @@ function callHttp(handler, body) {
   })
 }
 
+test('新版目录切换使旧建议失效，同时保留显式 workdir 和新建议执行能力', async () => {
+  const original = createRepo(), current = createRepo(), registered = new Map()
+  let directory = original, route
+  const sessionId = 'directory-switch', session = { header: { cwd: original } }
+  const services = {
+    shell: makeShell(original),
+    tools: { register: tool => registered.set(tool.name, tool) },
+    agents: { get: () => ({ session }) },
+    workingDirectory: { get: () => directory },
+    connection: { requestRejection: () => undefined },
+    webServer: { register: definition => { route = definition } },
+  }
+  try {
+    plugin.apply({ get: key => services[key] })
+    const exec = { agent: { id: sessionId, session } }
+    const propose = args => registered.get('git_propose').execute({ intent: '创建分支', explanation: '目录测试', command: 'git branch compat-test', ...args }, exec)
+    const execute = proposal => callHttp(route.handler, { action: 'execute', sessionId, proposalId: proposal.proposalId })
+    const old = await propose({})
+    assert.equal(old.ok, true)
+    directory = current
+    const state = await registered.get('git_repo_state').execute({}, exec)
+    assert.equal(state.workdir, current)
+    assert.equal((await callHttp(route.handler, { action: 'get-summary', sessionId })).body.data.topLevel, current)
+    const stale = await execute(old)
+    assert.equal(stale.body.ok, false)
+    assert.match(stale.body.error, /工作目录已变化/)
+    assert.equal(helpers.findProposal(sessionId, old.proposalId).status, 'dismissed')
+    assert.equal(execFileSync('git', ['branch', '--list', 'compat-test'], { cwd: original, encoding: 'utf8' }), '')
+    const explicit = await propose({ workdir: original })
+    assert.equal(explicit.workdir, original)
+    assert.equal((await execute(explicit)).body.ok, true)
+    const next = await propose({})
+    assert.equal(next.workdir, current)
+    assert.equal((await execute(next)).body.ok, true)
+    for (const cwd of [original, current]) assert.match(execFileSync('git', ['branch', '--list', 'compat-test'], { cwd, encoding: 'utf8' }), /compat-test/)
+  } finally { cleanup(original); cleanup(current) }
+})
+
 test('AI 提交说明接口使用暂存内容、项目背景和会话模型；拒绝无效及过期结果', async () => {
   const dir = createRepo()
   const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })

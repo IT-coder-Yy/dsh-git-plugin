@@ -1,12 +1,10 @@
 import type { AnyRecord } from './view-model'
+import { rpc } from './rpc'
 const React = require('react')
 export const sideChatSessions = new Set<string>()
 
 export async function openSideChat(sessionId: string): Promise<string> {
-  const response = await fetch('/easygit', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'side-chat', sessionId }),
-  }).then(response => response.json())
+  const response = await rpc({ action: 'side-chat', sessionId })
   if (!response.ok) throw new Error(response.error || '无法打开 Git 助手')
   sideChatSessions.add(response.sessionId)
   return response.sessionId

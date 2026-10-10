@@ -56,6 +56,7 @@ test('Host Action 路由与 Client 生命周期、视图模型保持独立模块
 test('Client 与 Host 共用唯一 Action 数据契约', () => {
   const contracts = readFileSync(join(__dirname, '../src/shared/contracts.ts'), 'utf8')
   const client = readFileSync(join(__dirname, '../src/client/index.ts'), 'utf8')
+    + readFileSync(join(__dirname, '../src/client/rpc.ts'), 'utf8')
   const repository = readFileSync(join(__dirname, '../src/host/git-repository-service.ts'), 'utf8')
   const proposals = readFileSync(join(__dirname, '../src/host/proposal-service.ts'), 'utf8')
 
@@ -515,7 +516,7 @@ test('认证服务缺失时 Web 操作失败关闭', async () => {
   assert.strictEqual(response.status, 503)
 })
 
-test('无 Agent 的已加载会话仍可读取仓库并应用会话沙箱', async () => {
+for (const current of [undefined, '/tmp/current-worktree']) test(`已加载会话使用${current ? '新版当前目录' : '旧版创建目录'}并保留沙箱边界`, async () => {
   let route
   let resolvedSession
   let capturedSpec
@@ -525,6 +526,7 @@ test('无 Agent 的已加载会话仍可读取仓库并应用会话沙箱', asyn
     shell: { resolve: (spec) => { capturedSpec = spec; return spec }, run: async () => ({ exitCode: 1, stdout: { text: '' }, stderr: { text: '' } }) },
     agents: { get: () => undefined },
     sessions: { get: () => session },
+    workingDirectory: current ? { get: value => { assert.strictEqual(value, session); return current } } : undefined,
     sandboxPolicy: { resolve({ session }) { resolvedSession = session; return { mode: 'read-only', workspaceRoot: session.header.cwd } } },
     connection: { requestRejection: () => undefined },
     webServer: { register(definition) { route = definition } },
@@ -533,11 +535,12 @@ test('无 Agent 的已加载会话仍可读取仓库并应用会话沙箱', asyn
   const result = await callHttp(route.handler, { action: 'get-summary', sessionId: 'idle-session' })
   assert.notStrictEqual(result.body.code, 'SESSION_NOT_FOUND')
   assert.strictEqual(resolvedSession, session)
-  assert.strictEqual(capturedSpec.workdir, '/tmp/session-repo')
+  assert.strictEqual(capturedSpec.workdir, current ?? '/tmp/session-repo')
   assert.strictEqual(capturedSpec.sandboxPolicy.mode, 'read-only')
+  assert.strictEqual(capturedSpec.sandboxPolicy.workspaceRoot, '/tmp/session-repo')
 })
 
-test('冷会话从观察快照恢复工作目录和沙箱模式并释放观察句柄', async () => {
+for (const current of [undefined, null, '/tmp/current-worktree']) test(`冷会话读取目录投影 ${current} 并保留原始沙箱边界`, async () => {
   let route
   let released = 0
   let capturedSpec
@@ -549,7 +552,7 @@ test('冷会话从观察快照恢复工作目录和沙箱模式并释放观察�
     sessions: { get: () => undefined },
     sessionQuery: { observeSession: async (id) => {
       if (id === 'missing') throw new Error('session not found')
-      return { header: { cwd: '/tmp/cold-repo' }, projections: { values: { sandboxMode: 'read-only' } }, [Symbol.dispose]() { released += 1 } }
+      return { header: { cwd: '/tmp/cold-repo' }, projections: { values: { sandboxMode: 'read-only', workingDirectory: current } }, [Symbol.dispose]() { released += 1 } }
     } },
     sandboxPolicy: { resolve(request) { mode = request.mode; return { mode: request.mode, workspaceRoot: '/wrong-default' } } },
     connection: { requestRejection: () => undefined },
@@ -559,7 +562,7 @@ test('冷会话从观察快照恢复工作目录和沙箱模式并释放观察�
   const result = await callHttp(route.handler, { action: 'get-summary', sessionId: 'cold-session' })
   assert.notStrictEqual(result.body.code, 'SESSION_NOT_FOUND')
   assert.strictEqual(mode, 'read-only')
-  assert.strictEqual(capturedSpec.workdir, '/tmp/cold-repo')
+  assert.strictEqual(capturedSpec.workdir, current ?? '/tmp/cold-repo')
   assert.deepStrictEqual(capturedSpec.sandboxPolicy, { mode: 'read-only', workspaceRoot: '/tmp/cold-repo', sessionId: 'cold-session' })
   assert.strictEqual(released, 1)
   const missing = await callHttp(route.handler, { action: 'get-summary', sessionId: 'missing' })

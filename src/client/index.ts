@@ -2,7 +2,8 @@ import { GitConflictsTab } from './conflict-tab'
 import { GitStashesTab } from './stash-tab'
 import { GitMergeTab } from './merge-tab'
 import { GitCommitActions } from './commit-actions'
-import { sideChatSessions } from './side-chat'
+import { openSideChat, sideChatSessions } from './side-chat'
+import { rpc } from './rpc'
 import { parseConflictBlocks, chooseConflictBlock, conflictLineRanges } from './conflict-model'
 /**
  * dsh-easygit-plugin Client half as a static Cordis plugin package.
@@ -57,7 +58,6 @@ import type {
   DiffResult,
   EasyGitAction,
   EasyGitRequest,
-  EasyGitResponse,
   GitFailureContext,
   ProposalExecutionResponse,
   ProposalStateResponse,
@@ -123,17 +123,6 @@ interface CommitTabProps {
 }
 
 interface SyncTabProps extends RepositoryTabProps {}
-
-    const RPC_URL = '/easygit'
-
-    function rpc<A extends EasyGitAction>(body: EasyGitRequest<A>, signal?: AbortSignal): Promise<EasyGitResponse<A>> {
-      return fetch(RPC_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {}),
-        signal,
-      }).then((r) => r.json() as Promise<EasyGitResponse<A>>)
-    }
 
     function rpcRepositoryMutation(action: RepositoryMutationAction, sessionId: string, payload: AnyRecord = {}): Promise<ActionResult<RepositorySummary>> {
       const request = { action, sessionId, operationId: operationId(action), ...payload } as EasyGitRequest<RepositoryMutationAction>
@@ -2485,6 +2474,7 @@ interface SyncTabProps extends RepositoryTabProps {}
         ))
       },
       __testing: {
+        rpc, openSideChat,
         GitDock,
         GitWorkbenchPanel,
         GitChangesTab,

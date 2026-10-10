@@ -81,12 +81,17 @@ interface SessionRegistryLike {
   get(sessionId: string): SessionLike | undefined
 }
 
+interface WorkingDirectoryService {
+  get(session: SessionLike): string
+  defaultDirectory: string
+}
+
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 
 interface SessionQueryLike {
   observeSession(sessionId: string): Promise<{
     header: { cwd?: string }
-    projections?: { values: { sandboxMode?: SandboxMode | null } }
+    projections?: { values: { sandboxMode?: SandboxMode | null; workingDirectory?: string | null } }
     [Symbol.dispose](): void
   }>
 }
@@ -163,6 +168,8 @@ function sessionWorkdir(exec: ToolExecutionContext | undefined, args: UnknownRec
   try {
     if (args && typeof args.workdir === 'string' && args.workdir.trim()) return args.workdir.trim()
   } catch (e) { /* ignore */ }
+  const directories = ctx.get<WorkingDirectoryService | undefined>('workingDirectory')
+  if (exec?.agent?.session && directories) return directories.get(exec.agent.session)
   try {
     const agent = exec && exec.agent
     const session = agent && agent.session
@@ -192,11 +199,13 @@ async function repositoryContextForSession(ctx: HostContext, sandboxPolicy: Sand
     if (!query) return null
     const observation = await query.observeSession(sessionId)
     try {
-      const workdir = observation.header.cwd
+      const workdir = observation.projections?.values.workingDirectory ?? observation.header.cwd
+        ?? ctx.get<WorkingDirectoryService | undefined>('workingDirectory')?.defaultDirectory
       if (!workdir || !observation.projections) return null
       const mode = observation.projections.values.sandboxMode ?? undefined
       const policy = sandboxPolicy
-        ? { ...sandboxPolicy.resolve({ mode }), workspaceRoot: workdir, sessionId }
+        // Changing directory does not expand the session's original sandbox boundary.
+        ? { ...sandboxPolicy.resolve({ mode }), ...(observation.header.cwd ? { workspaceRoot: observation.header.cwd } : {}), sessionId }
         : undefined
       return { workdir, policy }
     } finally {
@@ -560,7 +569,7 @@ async function recoverFailedCommand(
 
 /** Register a recovery command as a pending proposal in the same session. */
 function registerRecoveryProposal(
-  failedProposal: Pick<StoredProposal, 'sessionId' | 'workdir'>,
+  failedProposal: Pick<StoredProposal, 'sessionId' | 'workdir' | 'sessionWorkdir'>,
   recovery: RecoverySuggestion,
   failure?: GitFailureContext,
 ): StoredProposal | null {
@@ -584,6 +593,7 @@ function registerRecoveryProposal(
     reasons: risk.reasons,
     confirmed: false,
     workdir: failedProposal.workdir,
+    sessionWorkdir: failedProposal.sessionWorkdir,
     createdAt: Date.now(),
     result: null,
     closed: false,
@@ -733,6 +743,7 @@ const plugin = {
           }
           const sideContext = chats.parentOf(agentSessionId!) ? await repositoryContextForSession(ctx, sandboxPolicy, sessionId) : null
           const workdir = sideContext?.workdir ?? sessionWorkdir(exec, args, ctx)
+          const proposalSessionWorkdir = sideContext?.workdir ?? sessionWorkdir(exec, {}, ctx)
           const policy = sideContext?.policy ?? sandboxPolicy?.resolve({ session: exec.agent?.session })
           const rawCommands = Array.isArray(args.steps) && args.steps.length ? args.steps : (args.command ? [args.command] : [])
           if (rawCommands.length === 0) {
@@ -785,6 +796,7 @@ const plugin = {
             reasons: risk.reasons,
             confirmed: false,
             workdir: workdir || '',
+            sessionWorkdir: proposalSessionWorkdir,
             createdAt: Date.now(),
             result: null,
             closed: false,
@@ -934,11 +946,15 @@ const plugin = {
         const result = await repository.serializeProposal(proposal.workdir, async () => {
           if (proposal.closed || proposal.status !== 'pending') return executeRegisteredProposal(activeShell, proposal, undefined, policy, persist)
           sendFeedback = true
-          if (typeof proposal.repositorySnapshot === 'string' && proposal.repositorySnapshot !== await repository.proposalSnapshot(proposal.workdir, policy)) {
+          const context = await repositoryContextForSession(ctx, sandboxPolicy, proposal.sessionId)
+          const directoryChanged = !context || context.workdir !== (proposal.sessionWorkdir ?? proposal.workdir)
+          if (directoryChanged || (typeof proposal.repositorySnapshot === 'string' && proposal.repositorySnapshot !== await repository.proposalSnapshot(proposal.workdir, policy))) {
             proposal.status = 'dismissed'
             proposal.closed = true
             await persist()
-            return executionError(proposal, '仓库已变化，此建议已失效；请让 Git 助手重新分析并生成建议')
+            return executionError(proposal, directoryChanged
+              ? '会话工作目录已变化，此建议已失效；请重新生成建议'
+              : '仓库已变化，此建议已失效；请让 Git 助手重新分析并生成建议')
           }
           const execution = await executeRegisteredProposal(activeShell, proposal, undefined, policy, persist)
           const recovery = execution.recovery?.proposalId && findProposal(proposal.sessionId, execution.recovery.proposalId)
