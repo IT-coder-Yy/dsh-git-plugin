@@ -24,3 +24,23 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm pack --dry-run --ignore-scripts
+
+  dsh-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        dsh-version: [0.2.0-rc.1, 0.2.0-rc.2, 0.2.1-alpha.1, 0.2.1-alpha.2]
+    env:
+      DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-compat
+      DSH_VERSION: ${{ matrix.dsh-version }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+      - run: npm ci --include=dev
+      - run: npm run build
+      - run: npm install --prefix "$DSH_INSTALL_DIR" --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
+      - run: npm run test:dsh

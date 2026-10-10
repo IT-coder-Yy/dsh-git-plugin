@@ -66,6 +66,7 @@
     "build": "npm run typecheck && npm run build:js",
     "lint": "npm run typecheck && node --check lib/index.js && node --check lib/client.js",
     "test": "npm run build && node --test \"test/*.test.js\"",
+    "test:dsh": "node scripts/check-dsh-compat.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "check": "npm run lint && npm test && npm run verify:build",
     "prepublishOnly": "npm run lint && npm test && npm run verify:build && npm pack --dry-run"
