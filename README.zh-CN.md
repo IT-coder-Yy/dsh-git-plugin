@@ -41,7 +41,7 @@
 
 ## 快速开始
 
-需要 Git、Node.js `^22.19.0 || >=24.0.0` 和 DeepSeek Harness Web。插件 `0.4.0` 已验证兼容 DSH `0.2.0-rc.1`，详见[兼容性](#兼容性)。
+需要 Git、Node.js `^22.19.0 || >=24.0.0` 和 DeepSeek Harness Web。以下是已验证的已发布组合；当前源码的多版本支持范围见[兼容性](#兼容性)。
 
 ```sh
 npm install -g @deepseek-ai/dsh@0.2.0-rc.1
@@ -112,15 +112,12 @@ dsh plugin --profile web add "${PWD}"
 
 ## 兼容性
 
-`0.4.0` 已在 DSH `0.2.0-rc.1` 验证，独立 Git 助手需要 DSH 0.2 的原生会话接口。Shell 使用 `execute(spec).result()`，并保留旧版 `run(spec)` 调用兼容。验证包括 160 项自动测试，以及真实 DSH、浏览器、模型和临时 Git 仓库操作；详见[完整验证记录](docs/full-verification-2026-09-29.zh-CN.md)。未完成桌面端或其他操作系统实测。
-
-DSH `0.2.0-rc.1` 会跳过依赖声明不兼容当前运行时的插件。升级时请检查其他已安装插件：`dshmarket@1.66.5` 已声明支持 DSH `0.2.0-rc.1`；`dsh-client-auto-continue@0.11.9` 仍只声明支持 DSH `0.1.x` 的 settings 依赖，会被跳过，需等待兼容版本后再在 DSH `0.2` 中使用。
-
-## 安全与 Agent 工具
-
-高风险操作必须显式确认。Agent 提议在创建和执行前均经过 Git 命令白名单校验，禁止 shell 控制符、命令替换、重定向与不安全选项，且不可重复执行。命令遵循 Harness Shell 与会话沙箱策略；请在可信仓库与 Git 配置中使用。
-
-Agent 通过 `git_repo_state` 只读查看仓库，通过 `git_propose` 登记命令提议。如需报告安全漏洞，请按照 [SECURITY.md](SECURITY.md) 私下联系。
+| DSH 版本 | 真实服务冒烟测试 | 工作目录读取 |
+| --- | --- | --- |
+| `0.2.0-rc.1` | 通过 | 原有会话目录 |
+| `0.2.0-rc.2` | 通过 | 原有会话目录 |
+| `0.2.1-alpha.1` | 通过 | 原有会话目录 |
+| `0.2.1-alpha.2` | 通过 | 当前工作目录，支持切换 worktree |
 
 ## 开发
 
@@ -131,6 +128,15 @@ npm pack --dry-run --ignore-scripts
 ```
 
 `npm run check` 执行类型检查、测试与构建一致性检查。Git 集成测试会创建临时仓库，验证仓库操作与失败恢复场景。
+
+CI 另对上表四个 DSH 版本运行 `npm run test:dsh`。本地复现单个版本：
+
+```sh
+npm install --prefix /tmp/easygit-dsh-check @deepseek-ai/dsh@0.2.1-alpha.2
+DSH_INSTALL_DIR=/tmp/easygit-dsh-check npm run test:dsh
+```
+
+测试使用临时 DSH_HOME 和 Git 仓库，结束后清理，不读取现有会话或调用模型。
 
 ## 许可证
 

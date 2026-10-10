@@ -41,7 +41,7 @@ For more involved workflows, chat with the independent Git assistant in **建议
 
 ## Quick start
 
-Requires Git, Node.js `^22.19.0 || >=24.0.0`, and DeepSeek Harness Web. Plugin `0.4.0` is verified with DSH `0.2.0-rc.1`; see [compatibility](#compatibility).
+Requires Git, Node.js `^22.19.0 || >=24.0.0`, and DeepSeek Harness Web. The commands below use a verified published combination; see [compatibility](#compatibility) for the current source's multi-version support.
 
 ```sh
 npm install -g @deepseek-ai/dsh@0.2.0-rc.1
@@ -112,15 +112,12 @@ You can also install directly from the repository with `dsh plugin --profile web
 
 ## Compatibility
 
-Version `0.4.0` is verified with DSH `0.2.0-rc.1`. The independent Git assistant requires the native session APIs in DSH 0.2. Shell execution uses `execute(spec).result()` and retains the legacy `run(spec)` fallback. Validation covers 160 automated tests and real DSH, browser, model, and temporary Git repository workflows; see the [full verification report](docs/full-verification-2026-09-29.zh-CN.md). Desktop and other operating systems have not been fully tested.
-
-DSH `0.2.0-rc.1` skips plugins whose declared peer dependencies exclude the runtime version. Check other installed plugins when upgrading: `dshmarket@1.66.5` declares support for DSH `0.2.0-rc.1`, while `dsh-client-auto-continue@0.11.9` still declares only DSH `0.1.x` settings dependencies and is skipped. Wait for a compatible auto-continue release before using it on DSH `0.2`.
-
-## Safety and Agent tools
-
-High-risk actions require explicit confirmation. Agent proposals are validated against a Git command allowlist when created and before execution; shell control operators, substitutions, redirection, and unsafe options are rejected. Proposals cannot be replayed. Commands follow Harness Shell and session sandbox policies; use trusted repositories and Git configuration.
-
-The Agent uses `git_repo_state` for read-only repository inspection and `git_propose` to register command proposals. Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+| DSH version | Real-service smoke test | Working directory |
+| --- | --- | --- |
+| `0.2.0-rc.1` | Passed | Original session directory |
+| `0.2.0-rc.2` | Passed | Original session directory |
+| `0.2.1-alpha.1` | Passed | Original session directory |
+| `0.2.1-alpha.2` | Passed | Current directory, including worktree changes |
 
 ## Development
 
@@ -131,6 +128,15 @@ npm pack --dry-run --ignore-scripts
 ```
 
 `npm run check` runs type checks, tests, and build reproducibility checks. Git integration tests create temporary repositories for repository operations and recovery scenarios.
+
+CI also runs `npm run test:dsh` against each release above. To reproduce one version locally:
+
+```sh
+npm install --prefix /tmp/easygit-dsh-check @deepseek-ai/dsh@0.2.1-alpha.2
+DSH_INSTALL_DIR=/tmp/easygit-dsh-check npm run test:dsh
+```
+
+The smoke test uses and cleans up a temporary DSH_HOME and Git repository. It does not read existing sessions or call a model.
 
 ## License
 
