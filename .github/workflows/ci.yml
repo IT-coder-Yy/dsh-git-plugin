@@ -33,7 +33,6 @@ jobs:
       matrix:
         dsh-version: [0.2.0-rc.1, 0.2.0-rc.2, 0.2.1-alpha.1, 0.2.1-alpha.2]
     env:
-      DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-compat
       DSH_VERSION: ${{ matrix.dsh-version }}
     steps:
       - uses: actions/checkout@v6
@@ -42,5 +41,9 @@ jobs:
           node-version: 24.x
       - run: npm ci --include=dev
       - run: npm run build
-      - run: npm install --prefix "$DSH_INSTALL_DIR" --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
-      - run: npm run test:dsh
+      - name: Check DSH compatibility
+        env:
+          DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-compat
+        run: |
+          npm install --prefix "$DSH_INSTALL_DIR" --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
+          npm run test:dsh
